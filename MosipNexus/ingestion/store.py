@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from config.settings import (
     PG_CONNECTION, CHUNK_OVERLAP, CHUNK_SIZE, CODE_COLLECTION, CODE_FILE,
     COMMUNITY_COLLECTION, COMMUNITY_FILE, CONFLUENCE_COLLECTION, CONFLUENCE_FILE,
-    DOCS_COLLECTION, DOCS_FILE, EMBED_MODEL,
+    DOCS_COLLECTION, DOCS_FILE, WEBSITE_COLLECTION, WEBSITE_FILE, EMBED_MODEL,
     GITHUB_COLLECTION, GITHUB_FILE, JIRA_COLLECTION, JIRA_FILE,
 )
 
@@ -393,6 +393,21 @@ if __name__ == "__main__":
     print(f"  Loaded {len(doc_documents)} doc pages")
     ingest(doc_documents, DOCS_COLLECTION, embeddings)
 
+    print(f"\n-- Ingesting WEBSITE -> '{WEBSITE_COLLECTION}' --")
+
+    website_documents = prepare_generic_documents(
+        WEBSITE_FILE,
+        "website",
+    )
+
+    if website_documents:
+        print(f"  Loaded {len(website_documents)} website pages")
+        ingest(
+            website_documents,
+            WEBSITE_COLLECTION,
+            embeddings,
+        )
+
     print(f"\n-- Ingesting COMMUNITY -> '{COMMUNITY_COLLECTION}' --")
     with open(COMMUNITY_FILE, encoding="utf-8") as f:
         raw_community = json.load(f)
@@ -475,15 +490,29 @@ if __name__ == "__main__":
                 project_state = jira_state.setdefault(project, {"seen_keys": [], "last_run": now_iso()})
                 project_state["seen_keys"].append(key)
 
+    website_url_hashes = {}
+
+    if WEBSITE_FILE.exists():
+        with open(WEBSITE_FILE, encoding="utf-8") as f:
+            raw_website = json.load(f)
+
+        website_url_hashes = {
+            item["url"]: content_hash(item.get("content", ""))
+            for item in raw_website
+            if item.get("content", "").strip()
+        }
+
     save_state({
         "pipeline_version": PIPELINE_VERSION,
         "docs":             {"url_hashes": url_hashes, "last_run": now_iso()},
+        "website":          {"url_hashes": website_url_hashes,"last_run": now_iso()},
         "community":        {"max_topic_id": max_topic_id, "last_run": now_iso()},
         "github":           github_state,
         "confluence":       confluence_state,
         "jira":             jira_state,
     })
     print(f"  Tracked {len(url_hashes)} doc pages, "
+          f"{len(website_url_hashes)} website pages."
           f"max community topic ID: {max_topic_id}, "
           f"{len(github_state)} GitHub repos, "
           f"{len(confluence_state['page_versions'])} Confluence pages, "

@@ -199,6 +199,7 @@ _SOURCE_LABEL = {
     "code":        "Source Code",
     "confluence":  "Confluence",
     "jira":        "Jira Tickets",
+    "website": "MOSIP Website",
     "mixed":       "Docs · Community · GitHub · Code",
     "web":         "Web Sources",
     "none":        "",
@@ -254,6 +255,15 @@ _SVG_ICON = {
         '<path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10'
         ' 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>'
     ),
+
+    "website": _svg(
+    '<circle cx="12" cy="12" r="10"/>'
+    '<line x1="2" y1="12" x2="22" y2="12"/>'
+    '<path d="M12 2a15.3 15.3 0 0 1 4 10 '
+    '15.3 15.3 0 0 1-4 10 '
+    '15.3 15.3 0 0 1-4-10 '
+    '15.3 15.3 0 0 1 4-10z"/>'
+    ),
 }
 
 _SIDEBAR_SOURCES_HTML = (
@@ -262,6 +272,7 @@ _SIDEBAR_SOURCES_HTML = (
         f'<div>{_SVG_ICON[k]} {label}</div>'
         for k, label in [
             ("docs",        "MOSIP Documentation"),
+            ("website", "MOSIP Website"),
             ("community",   "Community Forum"),
             ("github",      "GitHub Issues"),
             ("confluence",  "Confluence"),

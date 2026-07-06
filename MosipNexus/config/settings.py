@@ -32,6 +32,11 @@ DOCS_BASE_URL    = "https://docs.mosip.io/1.2.0"
 DOCS_SITEMAP_URL = f"{DOCS_BASE_URL}/sitemap.xml"
 COMMUNITY_BASE_URL = "https://community.mosip.io"
 
+# ──MOSIP Website ──────────────────────────────────────────────────────────────
+WEBSITE_BASE_URL = "https://www.mosip.io"
+WEBSITE_FILE = DATA_DIR / "mosip_website.json"
+WEBSITE_COLLECTION = "mosip_website"
+
 # ── Embeddings ─────────────────────────────────────────────────────────────────
 EMBED_MODEL = "intfloat/multilingual-e5-base"   # 768-dim, 100+ languages
 

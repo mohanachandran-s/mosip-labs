@@ -28,11 +28,12 @@ sys.path.insert(0, str(Path(__file__).parent))
 from crawler.community_crawler import crawl_incremental as community_incremental
 from crawler.confluence_crawler import crawl_incremental as confluence_incremental
 from crawler.docs_crawler import crawl_incremental as docs_incremental
+from crawler.web_crawler import crawl_incremental as website_incremental
 from crawler.github_crawler import crawl_incremental as github_incremental
 from crawler.jira_crawler import crawl_incremental as jira_incremental
 from crawler.state import load, now_iso, save
 from config.settings import (
-    COMMUNITY_COLLECTION, CONFLUENCE_COLLECTION, DOCS_COLLECTION,
+    COMMUNITY_COLLECTION, CONFLUENCE_COLLECTION, DOCS_COLLECTION,WEBSITE_COLLECTION,
     GITHUB_COLLECTION, GITHUB_REPOS, JIRA_COLLECTION, JIRA_PROJECT_KEYS,
     JIRA_TOKEN, JIRA_URL, JIRA_USER, PIPELINE_VERSION, PG_CONNECTION,
 )
@@ -92,6 +93,37 @@ def run() -> None:
         state["docs"]["last_run"] = now_iso()
     else:
         print("Docs: nothing to update.")
+    # ── Website ────────────────────────────────────────────────────────────────
+    print("\n══ WEBSITE ════════════════════════════════════════════════════════")
+
+    new_website, changed_website, unchanged_website = website_incremental(state)
+
+    print(
+        f"\nResult: {len(new_website)} new | "
+        f"{len(changed_website)} changed | "
+        f"{unchanged_website} unchanged"
+    )
+
+    if new_website or changed_website:
+        print(f"\nIngesting into '{WEBSITE_COLLECTION}'...")
+
+        ingest_incremental(
+            new_website,
+            changed_website,
+            WEBSITE_COLLECTION,
+            embeddings,
+            source_type="website",
+        )
+
+        url_hashes = state.setdefault("website", {}).setdefault("url_hashes", {})
+
+        for page in new_website + changed_website:
+            url_hashes[page["url"]] = page["_hash"]
+
+        state["website"]["last_run"] = now_iso()
+
+    else: 
+        print("Website: nothing to update.")
 
     # ── Community ──────────────────────────────────────────────────────────────
     print("\n══ COMMUNITY ═════════════════════════════════════════════════════")
