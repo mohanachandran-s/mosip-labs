@@ -28,11 +28,8 @@ from config.settings import (
 
 
 
-def fetch_page_as_markdown(url: str) -> str:
-    """Fetch a single docs page and return its main content as ATX Markdown."""
-    res = requests.get(url, headers=HTTP_HEADERS, timeout=30)
-    res.raise_for_status()
-    soup = BeautifulSoup(res.text, "html.parser")
+def fetch_page_as_markdown(soup: BeautifulSoup) -> str:
+    """Convert already-fetched HTML into Markdown."""
 
     content = (
         soup.find("main")
@@ -41,12 +38,12 @@ def fetch_page_as_markdown(url: str) -> str:
         or soup.find("div", class_="container")
         or soup.body
     )
+
     return markdownify(
         str(content),
         heading_style="ATX",
         strip=["script", "style", "nav", "footer", "head"],
     )
-
 
 def crawl_website(depth: int = 3):
     visited = set()
@@ -70,7 +67,7 @@ def crawl_website(depth: int = 3):
 
             soup = BeautifulSoup(response.text, "html.parser")
 
-            content = fetch_page_as_markdown(url)
+            content = fetch_page_as_markdown(soup)
 
             if len(content.strip()) > 100:
                 docs.append(
@@ -93,7 +90,7 @@ def crawl_website(depth: int = 3):
                     _crawl(next_url, d - 1)
 
         except Exception as e:
-            print(e)
+            print(f"SKIP {url}: {e}")
 
         time.sleep(CRAWL_DELAY_SECS)
 
