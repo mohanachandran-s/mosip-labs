@@ -42,6 +42,7 @@ _docs_store: PGVector | None = None
 _community_store: PGVector | None = None
 _github_store: PGVector | None = None
 _code_store: PGVector | None = None
+_confluence_store: PGVector | None = None
 _pg_engine = None
 
 
@@ -76,7 +77,7 @@ def _try_load_optional_store(collection_name: str, embeddings: HuggingFaceEmbedd
 
 
 def _build() -> None:
-    global _embeddings, _docs_store, _community_store, _github_store, _code_store
+    global _embeddings, _docs_store, _community_store, _github_store, _code_store, _confluence_store
     _embeddings = HuggingFaceEmbeddings(model_name=EMBED_MODEL)
     _docs_store = PGVector(
         embeddings=_embeddings,
@@ -90,6 +91,10 @@ def _build() -> None:
     )
     _github_store = _try_load_optional_store(GITHUB_COLLECTION, _embeddings)
     _code_store   = _try_load_optional_store(CODE_COLLECTION, _embeddings)
+    _confluence_store = _try_load_optional_store(
+        CONFLUENCE_COLLECTION,
+        _embeddings,
+    )
 
 
 def get_collection_counts() -> dict[str, int]:
@@ -164,6 +169,17 @@ def retrieve(query: str, k: int = RETRIEVAL_K) -> tuple[list[Document], str]:
         )
         github_results = github_retriever.invoke(query)
 
+    confluence_results: list[Document] = []
+    if _confluence_store is not None:
+        confluence_retriever = _confluence_store.as_retriever(
+            search_type="mmr",
+            search_kwargs={
+                "k": k,
+                "fetch_k": RETRIEVAL_FETCH_K,
+            },
+        )
+        confluence_results = confluence_retriever.invoke(query)
+
     code_results: list[Document] = []
     if _code_store is not None:
         # 3× boost for error-code queries and explicit code/class questions
@@ -187,6 +203,8 @@ def retrieve(query: str, k: int = RETRIEVAL_K) -> tuple[list[Document], str]:
         _score_stores.append((_github_store, 1.0))
     if _code_store is not None:
         _score_stores.append((_code_store, 1.0))
+    if _confluence_store is not None:
+        _score_stores.append((_confluence_store, 1.0))
 
     for store, _ in _score_stores:
         try:
@@ -203,4 +221,11 @@ def retrieve(query: str, k: int = RETRIEVAL_K) -> tuple[list[Document], str]:
     else:
         confidence = "low"
 
-    return doc_results + community_results + github_results + code_results, confidence
+    return (
+         doc_results
+         + community_results
+         + github_results
+         + code_results
+         + confluence_results,
+         confidence,
+    )
