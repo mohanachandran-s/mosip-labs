@@ -12,6 +12,17 @@ python -m crewline cold-start
 
 `cold-start` must PASS (frozen pack, adapter --check, synthetic --apply sequence). If it FAIL, fix Crewline first; do not start a MOSIP story.
 
+## P3 design path (same stranger, before code)
+
+Feature only. After ACCEPTANCE_REVIEW: DESIGN, then TESTCASE_DESIGN. `manifest --to TESTCASE_DESIGN` must FAIL
+until `design_readiness` is PASS **and** `packets/DESIGN.md` exists (tests from the approved design). Do not write
+production code first.
+
+## Two models (rails, not a bake-off)
+
+On this machine run `python -m crewline evals --pack frozen --run` under Cursor, then once under Claude Code.
+Both must stay green. That is the two-model contract. It does not ask either model to write the story.
+
 ## Feature walk (different person than the Crewline author)
 
 1. New Cursor (or Claude Code) chat. Do not paste this repo's internals. Story only, e.g. a small pre-registration AC.

@@ -7,6 +7,14 @@ The core lives at `{{CORE}}`.
 **Token fire-break:** after INTAKE do not re-read `principles.md` or every agent file. One specialist, smallest packet,
 never paste reports, never poll. `crewline usage --mark` each step; budget FAIL -> STOP.
 
+**Search, clip, hand off:** Read / Grep / Glob after `local-context.md` (not `cat`/`find` of the tree). Bulky commands
+through `python -m crewline run`; read CLIP-002 or `python -m crewline clip --file <log>`, never the raw log. Hooks deny
+`cat` of logs and raw test suites (GRD-007) and Read of dump/oversized files (GRD-008). Developer
+writes `code_refs` / `test_ids` / evidence paths on the manifest; QA reads those + `.crewline/qa/` + the packet, not the
+chat. Leaving DESIGN needs `packets/DESIGN.md`. Bug-fix IMPLEMENTATION_PLAN needs `evidence/reproduction.json`
+(failed base run). IMPLEMENTATION needs a non-empty `scope.approved_paths`. Feature / dependency-upgrade
+review needs `evidence/dependency-security.json`. RTK is optional for other bash; Crewline does not require it.
+
 On every task:
 1. At **INTAKE only**, read `{{CORE}}/core/principles.md`. Run `python -m crewline pack` and load only that pack's knowledge dirs
    (`packs/<id>/pack.yaml`). MOSIP (default) adds `knowledge/mosip` and `knowledge/frameworks`. Then the target

@@ -19,6 +19,7 @@ Calls are de-duplicated by message id. The numbers are what the API reported, no
   USE-006  no metered calls (typical on Cursor): adapter fire-break is the control  INFO
   USE-007  a specialist packet on disk exceeds packet_max_chars       BLOCK
   USE-008  a packet looks like a dump of Crewline core / a full report BLOCK
+  USE-009  a recorded transition has no usage_mark (Cursor has no transcript; --apply must stamp one) BLOCK
 
 Exceeding a budget is WAITING_FOR_USER: continue (attributed exception on token_budget), split the task, or abort.
 """
@@ -182,6 +183,16 @@ def report(manifest_path: str, transcripts: list[str], out: str | None = None) -
                         "(do not re-read core, do not poll, do not paste reports)")
             elif b["total"] > cap * budget["warn_ratio"]:
                 res.add("USE-005", WARN, f"{stage}: {b['total']:,} is past {budget['warn_ratio']:.0%} of budget {cap:,}")
+    hist = doc.get("state_history") or []
+    marks = doc.get("usage_marks") or []
+    if hist and not marks:
+        res.add("USE-009", BLOCK, "state_history has hops but no usage_marks: `manifest --apply` stamps one; "
+                "on Cursor that is the meter (USE-006)")
+    for h in hist:
+        label = f"{h.get('from')}->{h.get('to')}"
+        hat = _ts(h["at"]) if h.get("at") else 0
+        if not any(m.get("label") == label or _ts(m.get("at") or h.get("at") or "") >= hat for m in marks):
+            res.add("USE-009", BLOCK, f"no usage_mark for {label}: `manifest --apply` stamps it")
     _check_packets(manifest_path, budget, res)
     data = {"task_id": doc.get("task_id"), "generated_at": now_iso(), "window": [doc["started_at"], doc.get("finished_at")],
             "budget": budget,

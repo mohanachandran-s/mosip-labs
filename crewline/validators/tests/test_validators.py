@@ -208,7 +208,7 @@ def test_secret_blocks_and_is_never_echoed(tmp_path):
 def base_manifest(**over):
     doc = {
         "task_id": "t1", "outcome": "IN_PROGRESS", "current_state": "FAILURE_TRIAGE",
-        "scope": {"module": "prereg", "repositories": []},
+        "scope": {"module": "prereg", "repositories": [], "approved_paths": ["api-test/**"]},
         "requirements": {"source_refs": [], "acceptance_criteria": [], "open_ambiguities": 0},
         "testcases": {"canonical_format": "existing-api-testrig-yaml"},
         "repair": {"attempt_count": 0, "attempt_history": [], "classification": "AUTOMATION"},
@@ -286,6 +286,7 @@ def test_apply_records_only_legal_transitions(tmp_path):
     assert manifest.apply(path, "S_ESCALATE", "cap reached").status == "PASS"
     after = json.loads(Path(path).read_text())
     assert after["current_state"] == "S_ESCALATE" and after["state_history"][-1]["from"] == "FAILURE_TRIAGE"
+    assert any(m.get("label") == "FAILURE_TRIAGE->S_ESCALATE" for m in after.get("usage_marks") or [])
 
 
 def test_escalation_exit_needs_human_decision(tmp_path):

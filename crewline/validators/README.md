@@ -17,7 +17,8 @@ Result fields: `validator, status, summary, findings[rule_id, severity BLOCK|WAR
 | `regression` | REG-001..006 | Base vs branch from TestRig Extent full reports or JUnit/surefire XML: blocks pass→fail and failing new tests without an exception |
 | `tools` | TOOL-000..002 | Local capabilities from `core/tools.yaml` + active pack overlay; prints numbered enable steps for anything missing |
 | `pack` | PCK-001..002 | Show / `--list` / `--set` the product pack (`mosip` default). `CREWLINE_PACK` overrides for one process |
-| `run` / `evidence` | EVD-001..004 | `run` executes the command and records exit code, commit, worktree digest, log; `evidence` rejects missing fields, stale records (code changed since), non-zero exits |
+| `run` / `evidence` | EVD-001..004 | `run` executes the command and records exit code, commit, worktree digest, log, and a CLIP-002 digest; `evidence` rejects missing fields, stale records (code changed since), non-zero exits |
+| `clip` | CLIP-001..002 | digest of a command log so the agent never loads the raw file (`clip_max_chars` in `core/usage-budget.yaml`) |
 | `change-scope` | SCP-001..003 | Every changed file inside `scope.approved_paths`; CI/build/deploy/config files need an explicit `scope_change` approval |
 | `test-integrity` | TIN-001..006 | Unit tests (JUnit 4/5, TestNG; Jest/Vitest/Mocha): removed/disabled/focused tests, fewer assertions, deleted files; `--strict` blocks any test edit (refactor) |
 | `migration` | MIG-001..004 | MOSIP upgrade/rollback and release/revoke pairs, Flyway V/U; released scripts immutable; destructive statements flagged |
@@ -35,7 +36,8 @@ Result fields: `validator, status, summary, findings[rule_id, severity BLOCK|WAR
 | `usage` | USE-001..008 | API-reported tokens per stage/step; `core/usage-budget.yaml` caps (USE-003/004); packet dumps (USE-007/008). Gate `token_budget` |
 | `discover` | DSC-001..009 | Module onboarding: reads poms, tests, CI, DB scripts, deploy, guidance files, API TestRig suites and coding-standard checkers read-only; writes evidence-labelled drafts (`.crewline/development/`, `.crewline/qa/`, profile) and a validator baseline |
 | `diff-coverage` | DCV-001..004 | JaCoCo XML or lcov.info (Jest/Vitest) + git diff: share of changed executable production lines executed by tests (default 80%); unreported files and stale reports block |
-| `guard` | GRD-001..006 | Platform hooks: deny commit/push/PR without an active task and COMMIT_PR gates; always deny force-push, `--no-verify`, hard reset, stash, branch delete, merge, production deploy |
+| `guard` | GRD-001..008 | Platform hooks: deny commit/push/PR without an active task and COMMIT_PR gates; always deny force-push, `--no-verify`, hard reset, stash, branch delete, merge, production deploy; deny raw log dumps and unwrapped test suites (GRD-007); deny Read of dumps / files over `read_max_bytes` (GRD-008) |
+| `task` | TSK-001..006 | queue + `export`/`import` of manifest, packets and evidence JSON (logs omitted) |
 
 Per-module rules: `<module repo>/.crewline/qa/profile.yaml`. Every rule there cites the repository evidence it came from.
 

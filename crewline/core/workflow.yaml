@@ -67,6 +67,7 @@ entry_guards:
   IMPLEMENTATION:
     - {gate: plan_readiness, eq: PASS}
     - {gate: repo_ready, eq: PASS}
+    - {path: scope.approved_paths, ne: []}   # plan stamp is not a file list
   IMPLEMENTATION_REVIEW:
     - {gate: deterministic_validation, eq: PASS}
   FRESH_CONTEXT_REVIEW:

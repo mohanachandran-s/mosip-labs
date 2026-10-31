@@ -11,6 +11,15 @@ Core: `${CLAUDE_PLUGIN_ROOT}` (the installed plugin). This file is a thin adapte
 (ACs + FAIL findings). Never paste reports. Never poll. `crewline usage --mark` each step; `crewline usage --transcript`
 at each stage change. FAIL the budget -> STOP (continue / split / abort).
 
+**Search, clip, hand off:** Read / Grep / Glob after `local-context.md` (not `cat`/`find` of the tree). Bulky commands
+through `crewline run`; read CLIP-002 or `crewline clip --file <log>`, never the raw log. Hooks deny `cat` of logs and
+raw `mvn test` (GRD-007) and Read of dump/oversized files (GRD-008). Developer writes `code_refs` /
+`test_ids` / evidence paths on the manifest; QA reads those + `.crewline/qa/` + the packet, not the chat.
+Leaving DESIGN needs `packets/DESIGN.md`. Bug-fix IMPLEMENTATION_PLAN needs `evidence/reproduction.json` (failed base run).
+IMPLEMENTATION needs a non-empty `scope.approved_paths`. Feature / dependency-upgrade review needs
+`evidence/dependency-security.json`. Leaving SYSTEM_TEST_EXECUTION needs `evidence/system-tests.json`.
+RTK is optional.
+
 ## How to run a task
 
 1. At **INTAKE only**, read `${CLAUDE_PLUGIN_ROOT}/core/principles.md`. Run `crewline pack` and load only that pack's knowledge dirs

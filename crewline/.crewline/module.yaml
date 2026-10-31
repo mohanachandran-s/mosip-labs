@@ -1,0 +1,6 @@
+module: crewline
+upstream: mosip/mosip-labs
+stack: python
+roles:
+  development: [local-context.md]
+  qa: []

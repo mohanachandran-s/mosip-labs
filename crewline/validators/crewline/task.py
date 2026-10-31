@@ -1,14 +1,21 @@
-"""Thin task queue over tasks/*/task-manifest.json. Not a daemon and not `crewline start`.
+"""Thin task queue over tasks/*/task-manifest.json. Not a daemon. `start` is a conductor only.
 
   python -m crewline task list
   python -m crewline task status --id <id>
   python -m crewline task resume --id <id>
   python -m crewline task new --type feature --id <id>
+  python -m crewline task start --id <id> [--type feature]   # conductor: next --to, not the crew
+  python -m crewline start --id <id> [--type feature]        # same
+  python -m crewline task export --id <id> --out <dir-or-zip>
+  python -m crewline task import --from <dir-or-zip> [--id <id>]
 
   TSK-001  unknown task id                                                                          BLOCK
   TSK-002  new: id exists, invalid, or unknown type                                                 BLOCK
   TSK-003  resume: WAITING_FOR_USER / S_ESCALATE without resume_state                               BLOCK
   TSK-004  INFO listing / next-step (never walks the crew)                                          INFO
+  TSK-005  export/import: missing id, dest, or archive                                              BLOCK
+  TSK-006  export/import done (manifest + packets + evidence JSON; logs stay behind)                INFO
+  TSK-007  start (conductor): next --to and whether that transition would pass; never applies       INFO
 
 Workspace: CREWLINE_TASKS=<dir>, else <clone>/.crewline-work/tasks/ in a repository with .crewline/, else <core>/tasks/
 (see workspace.py).
@@ -18,6 +25,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -112,7 +121,72 @@ def _budget_note(doc: dict) -> str:
     return "tokens unmetered (run crewline usage, or Cursor fire-break)"
 
 
-def run(action: str, task_id: str | None = None, task_type: str | None = None) -> Result:
+def _portable_files(folder: Path) -> list[Path]:
+    """Manifest, packets, evidence JSON, usage — not logs or HTML reports."""
+    keep: list[Path] = []
+    for p in folder.rglob("*"):
+        if not p.is_file():
+            continue
+        if p.suffix.lower() in {".log", ".html"}:
+            continue
+        keep.append(p)
+    return keep
+
+
+def _export(task_id: str, dest: str, res: Result) -> Result:
+    path, doc, err = _load(task_id)
+    if doc is None:
+        res.add("TSK-001", BLOCK, err)
+        return res.finish()
+    src = path.parent
+    out = Path(dest)
+    if out.suffix.lower() == ".zip":
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+            for f in _portable_files(src):
+                zf.write(f, f.relative_to(src).as_posix())
+        res.add("TSK-006", INFO, f"exported {task_id} -> {out} (logs omitted)")
+    else:
+        dest_dir = out / task_id if out.exists() or out.suffix == "" else out
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        for f in _portable_files(src):
+            target = dest_dir / f.relative_to(src)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(f, target)
+        res.add("TSK-006", INFO, f"exported {task_id} -> {dest_dir} (logs omitted)")
+    return res.finish()
+
+
+def _import(archive: str, task_id: str | None, res: Result) -> Result:
+    src = Path(archive)
+    if not src.exists():
+        res.add("TSK-005", BLOCK, f"no archive at {src}")
+        return res.finish()
+    dest_id = task_id or (src.stem if src.suffix.lower() == ".zip" else src.name)
+    dest = tasks_root() / dest_id
+    if dest.exists():
+        res.add("TSK-002", BLOCK, f"{dest} already exists")
+        return res.finish()
+    dest.mkdir(parents=True)
+    if src.suffix.lower() == ".zip":
+        with zipfile.ZipFile(src) as zf:
+            zf.extractall(dest)
+    else:
+        for f in _portable_files(src):
+            target = dest / f.relative_to(src)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(f, target)
+    if not (dest / "task-manifest.json").is_file():
+        shutil.rmtree(dest, ignore_errors=True)
+        res.add("TSK-005", BLOCK, "archive has no task-manifest.json")
+        return res.finish()
+    res.add("TSK-006", INFO, f"imported {dest_id} -> {dest}. Resume: python -m crewline task resume --id {dest_id}")
+    res.inputs["manifest"] = str(dest / "task-manifest.json")
+    return res.finish()
+
+
+def run(action: str, task_id: str | None = None, task_type: str | None = None,
+        out: str | None = None, archive: str | None = None) -> Result:
     res = Result("task", inputs={"action": action, "root": str(tasks_root())})
     if action == "list":
         rows = _iter()
@@ -139,8 +213,8 @@ def run(action: str, task_id: str | None = None, task_type: str | None = None) -
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(json.dumps(skeleton(task_id, task_type), indent=2, ensure_ascii=False) + "\n",
                         encoding="utf-8")
-        res.add("TSK-004", INFO, f"created {dest} at INTAKE. Drive states with "
-                f"`python -m crewline manifest {dest} --to <STATE> [--apply]`. There is no crewline start.")
+        res.add("TSK-004", INFO, f"created {dest} at INTAKE. Conductor: `python -m crewline start --id {task_id}`. "
+                f"Drive states with `python -m crewline manifest {dest} --to <STATE> [--apply]`.")
         res.inputs["manifest"] = str(dest)
         return res.finish()
     if action in {"status", "resume"}:
@@ -173,5 +247,53 @@ def run(action: str, task_id: str | None = None, task_type: str | None = None) -
                 f"  python -m crewline manifest {path} --to {nxt} --apply\n"
                 "This does not walk the crew.")
         return res.finish()
-    res.add("TSK-002", BLOCK, f"unknown action {action!r}: list, status, resume, new")
+    if action == "start":
+        if not task_id:
+            res.add("TSK-001", BLOCK, "pass --id")
+            return res.finish()
+        path, doc, err = _load(task_id)
+        if doc is None:
+            if task_type:
+                created = run("new", task_id, task_type)
+                if created.status != "PASS":
+                    return created
+                path, doc, err = _load(task_id)
+            if doc is None:
+                res.add("TSK-001", BLOCK, err)
+                return res.finish()
+        nxt = _next_state(doc)
+        if not nxt:
+            res.add("TSK-007", INFO, f"{task_id} has no successor from {doc.get('current_state')} (terminal or blocked)")
+            return res.finish()
+        check = manifest.transition(str(path), nxt)
+        packet_hint = ""
+        from .packets import PACKET_FOR, packet_path
+        need = PACKET_FOR.get(nxt)
+        if need:
+            p = packet_path(str(path), need)
+            packet_hint = f" packet packets/{need}.md: {'present' if p.is_file() else 'MISSING'}"
+        res.add("TSK-007", INFO,
+                f"start {task_id} is a conductor, not the crew. Next:\n"
+                f"  python -m crewline manifest {path} --to {nxt}\n"
+                f"  python -m crewline manifest {path} --to {nxt} --apply   # only if the check is PASS\n"
+                f"check={check.status}{packet_hint}. Play the specialist for {nxt}; do not skip --apply.")
+        if check.status == "FAIL":
+            for f in check.findings:
+                if f.severity == "BLOCK":
+                    res.add(f.rule_id, BLOCK, f.message, path=f.path, evidence=f.evidence)
+        return res.finish()
+    if action == "export":
+        if not task_id:
+            res.add("TSK-001", BLOCK, "pass --id")
+            return res.finish()
+        if not out:
+            res.add("TSK-005", BLOCK, "pass --out <dir-or-zip>")
+            return res.finish()
+        return _export(task_id, out, res)
+    if action == "import":
+        if not archive:
+            res.add("TSK-005", BLOCK, "pass --from <dir-or-zip>")
+            return res.finish()
+        return _import(archive, task_id, res)
+    res.add("TSK-002", BLOCK, f"unknown action {action!r}: list, status, resume, new, start, export, import")
     return res.finish()

@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from . import session, version, workspace
-from .guard import check_shell, check_write, find_active_manifest
+from .guard import check_read, check_shell, check_write, find_active_manifest
 from .result import BLOCK
 
 SESSION_CONTEXT = (
@@ -119,6 +119,8 @@ def handle(mode: str, payload: dict, cwd: str | None = None) -> dict:
         return _permission(check_shell(_command_from(payload), manifest))
     if mode == "write":
         return _permission(check_write(_path_from(payload), manifest, _cwd_from(payload)))
+    if mode == "read":
+        return _permission(check_read(_path_from(payload), _cwd_from(payload)))
     return {"permission": "allow"}
 
 
@@ -169,6 +171,8 @@ def detect_mode(payload: dict) -> str:
     tool = str(payload.get("tool_name") or "")
     if tool in ("Write", "Edit", "StrReplace"):
         return "write"
+    if tool == "Read":
+        return "read"
     if tool == "Bash" or _command_from(payload):
         return "shell"
     if payload.get("tool_input") or payload.get("path"):

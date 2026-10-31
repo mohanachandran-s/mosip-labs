@@ -7,6 +7,11 @@ path: [S0_BOOTSTRAP_CHECK, INTAKE, INPUT_VALIDATION, REQUIREMENT_ANALYSIS, ACCEP
        SYSTEM_TEST_EXECUTION, FAILURE_TRIAGE, QUALITY_GATE, COMMIT_PR, PR_CLOSEOUT, RELEASE_READINESS,
        KNOWLEDGE_UPDATE, FINAL_REPORT, DONE]
 entry_guards:
+  DESIGN:
+    - {gate: requirement_clarity, eq: PASS}
+    - {gate: acceptance_readiness, eq: PASS}
+  TESTCASE_DESIGN:
+    - {gate: design_readiness, eq: PASS}
   IMPLEMENTATION:
     - {path: test_plan.environment, ne: ""}   # where SDET runs system tests on the branch build
   IMPLEMENTATION_PLAN:

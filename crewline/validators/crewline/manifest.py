@@ -329,6 +329,8 @@ def transition(manifest_path: str, to_state: str) -> Result:
     if to_state == "COMMIT_PR":
         _required_gates(ctx, res)
         _defects(doc, res)
+    from . import packets
+    packets.enforce(manifest_path, to_state, doc, res)
     return res.finish()
 
 
@@ -343,6 +345,7 @@ def apply(manifest_path: str, to_state: str, note: str = "") -> Result:
     src = doc.get("current_state")
     at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     doc.setdefault("state_history", []).append({"from": src, "to": to_state, "note": note, "at": at})
+    doc.setdefault("usage_marks", []).append({"label": f"{src}->{to_state}", "at": at, "state": to_state})
     if src == "WAITING_FOR_USER":                     # resuming: resume_state is consumed
         doc.pop("resume_state", None)
     if to_state in ctx.wf["special_states"]:

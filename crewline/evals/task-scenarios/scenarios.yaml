@@ -93,7 +93,7 @@ scenarios:
     automated_by: ::test_feature_plan_needs_design_approval_and_tests_first
   - id: EV-23
     name: Bug fix without reproduction
-    expected: IMPLEMENTATION_PLAN refused until reproduction PASS
+    expected: IMPLEMENTATION_PLAN refused until reproduction PASS and evidence/reproduction.json exit_code != 0
     automated_by: ::test_bug_fix_needs_reproduction_first
   - id: EV-24
     name: Own code breaks a test

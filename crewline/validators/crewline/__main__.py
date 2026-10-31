@@ -7,6 +7,7 @@ Workflow
   python -m crewline pack          [--list | --set <id>]          # product pack (default mosip)
 Development (any repository)
   python -m crewline run           --repo <dir> --out <record.json> [--report <path>] [--cwd <dir>] -- <command...>
+  python -m crewline clip          --file <log|-> [--max-chars N]     # digest a log; never load the raw file
   python -m crewline evidence      --record <record.json> --repo <dir>
   python -m crewline change-scope  --repo <dir> --base <ref> --manifest <task-manifest.json>
   python -m crewline test-integrity --repo <dir> --base <ref> [--approvals <yaml>] [--strict]
@@ -22,6 +23,7 @@ Development (any repository)
   python -m crewline evals             [--run] [--pack frozen]
   python -m crewline cold-start        # new-machine kit (frozen pack, adapters, synthetic --apply)
   python -m crewline task              list | status --id <id> | resume --id <id> | new --type <type> --id <id>
+                                       | export --id <id> --out <dir-or-zip> | import --from <dir-or-zip> [--id <id>]
   python -m crewline diff-coverage --repo <dir> --base <ref> --jacoco <jacoco.xml|dir> [--threshold 80]
   python -m crewline usage         --manifest <m> (--mark "<step>" | --transcript <session.jsonl> [--out <json>])
   python -m crewline regression    --baseline <report|surefire dir> --candidate <report|surefire dir> [--allow-fail <id>]
@@ -47,7 +49,7 @@ import argparse
 from pathlib import Path
 import sys
 
-from . import (adapter_check, branch, branch_env, change_scope, coding_standards, cold_start, coverage, dco, defect_reports, diff_coverage, discover, evals_run, evidence, expected_diff, guard, manifest, migration, pack, regression, requirement_clarity, requirement_fit, robustness, scope,
+from . import (adapter_check, branch, branch_env, change_scope, clip, coding_standards, cold_start, coverage, dco, defect_reports, diff_coverage, discover, evals_run, evidence, expected_diff, guard, manifest, migration, pack, regression, requirement_clarity, requirement_fit, robustness, scope,
                secrets_scan, task, test_integrity, testcase, tools, traceability, usage)
 from .apitestrig import Module, load_profile
 from .result import EXIT, Result
@@ -113,6 +115,9 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("run")
     p.add_argument("--repo", required=True); p.add_argument("--out", required=True)
     p.add_argument("--report"); p.add_argument("--cwd")
+    p = sub.add_parser("clip")
+    p.add_argument("--file", help="log path, or - for stdin (omit when a command follows --)")
+    p.add_argument("--max-chars", type=int, dest="max_chars")
     p = sub.add_parser("evidence")
     p.add_argument("--record", required=True); p.add_argument("--repo", required=True)
     p = sub.add_parser("change-scope"); repo_base(p); p.add_argument("--manifest", required=True)
@@ -135,10 +140,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--run", dest="run_evals", action="store_true")
     p.add_argument("--pack", dest="eval_pack", choices=["frozen"], help="official 8-story pack + expected-outcomes/")
     sub.add_parser("cold-start")
+    p = sub.add_parser("start", help="conductor: next --to for a task (not the crew)")
+    p.add_argument("--id", dest="task_id", required=True)
+    p.add_argument("--type", dest="task_type")
     p = sub.add_parser("task")
-    p.add_argument("action", choices=["list", "status", "resume", "new"])
+    p.add_argument("action", choices=["list", "status", "resume", "new", "start", "export", "import"])
     p.add_argument("--id", dest="task_id")
     p.add_argument("--type", dest="task_type", help="for `new`: feature, bug-fix, ...")
+    p.add_argument("--out", dest="task_out", help="for export: directory or .zip")
+    p.add_argument("--from", dest="task_from", help="for import: directory or .zip")
     sub.add_parser("session-start", help="SessionStart hook (prints hook JSON)")
     sub.add_parser("hook", help="platform hook: crewline hook [--claude|--cursor] [--plugin] session|shell|write (stdin JSON)")
     sub.add_parser("cursor-rule", help="print the Crewline rule for a module that uses .cursor/crewline.py")
@@ -157,6 +167,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("guard")
     p.add_argument("--shell", help="classify and gate a shell command (git commit/push, gh pr create, ...)")
     p.add_argument("--write", dest="write_path", help="gate a file write against scope.approved_paths")
+    p.add_argument("--read", dest="read_path", help="gate a Read of a dump file or oversized file")
     p.add_argument("--manifest", help="default: CREWLINE_TASK_MANIFEST or latest tasks/<id>/task-manifest.json")
     p.add_argument("--cwd", help="workspace root for relative write paths")
     p = sub.add_parser("manifest")
@@ -216,6 +227,13 @@ def main(argv: list[str] | None = None) -> int:
                 res = coverage.run(a.commons_dir, a.module_root, a.module_code, a.offline)
         elif a.cmd == "run":
             res = evidence.capture(a.repo, a.out, command, a.report, a.cwd)
+        elif a.cmd == "clip":
+            if command:
+                res = clip.run_command(command, a.max_chars)
+            elif a.file:
+                res = clip.run(a.file, a.max_chars)
+            else:
+                res = Result.not_run("clip", "pass --file <log> or -- <command>")
         elif a.cmd == "evidence":
             res = evidence.run(a.record, a.repo)
         elif a.cmd == "change-scope":
@@ -244,8 +262,10 @@ def main(argv: list[str] | None = None) -> int:
             res = evals_run.run(a.run_evals, a.eval_pack)
         elif a.cmd == "cold-start":
             res = cold_start.run()
+        elif a.cmd == "start":
+            res = task.run("start", a.task_id, a.task_type)
         elif a.cmd == "task":
-            res = task.run(a.action, a.task_id, a.task_type)
+            res = task.run(a.action, a.task_id, a.task_type, getattr(a, "task_out", None), getattr(a, "task_from", None))
         elif a.cmd == "discover":
             res = discover.run(a.repo, a.module, a.out, a.force)
         elif a.cmd == "diff-coverage":
@@ -262,8 +282,10 @@ def main(argv: list[str] | None = None) -> int:
                 res = guard.check_shell(a.shell, man)
             elif a.write_path:
                 res = guard.check_write(a.write_path, man, a.cwd)
+            elif getattr(a, "read_path", None):
+                res = guard.check_read(a.read_path, a.cwd)
             else:
-                res = Result.not_run("guard", "pass --shell or --write")
+                res = Result.not_run("guard", "pass --shell, --write or --read")
         else:
             if a.to and a.apply:
                 res = manifest.apply(a.manifest, a.to, a.note)

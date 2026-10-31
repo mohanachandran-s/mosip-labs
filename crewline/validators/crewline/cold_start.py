@@ -6,6 +6,7 @@
   CS-002  adapter --sync/--check FAIL for cursor, claude or generic                                BLOCK
   CS-003  synthetic feature --apply sequence does not refuse then accept the rails                 BLOCK
   CS-004  remaining human steps (evals/cold-start.md)                                              INFO
+  CS-005  ci/crewline.yml missing required rails jobs, or live workflow drifted                    BLOCK
 
 A PASS here means this clone can enforce the rails. A real feature on a stranger's machine is
 evals/cold-start.md — that still needs a module clone, a local-stack, and no Crewline author in the chat.
@@ -23,6 +24,8 @@ from .task import skeleton
 CORE = Path(__file__).resolve().parents[2]
 INSTALL = CORE / "adapters" / "install.py"
 PLAYBOOK = CORE / "evals" / "cold-start.md"
+CI_SPEC = CORE / "ci" / "crewline.yml"
+CI_NEEDLES = ("python -m pytest", "evals --pack frozen", "adapter", "cold-start")
 
 
 def _write(dir_path: Path, doc: dict, name: str = "task-manifest.json") -> str:
@@ -70,10 +73,39 @@ def _synthetic(res: Result) -> None:
                        {"gate": "robustness", "status": "PASS"},
                        {"gate": "requirement_fit", "status": "PASS"}]
         path = _write(root, d, "review-ok.json")
+        (Path(path).parent / "packets").mkdir(exist_ok=True)
+        (Path(path).parent / "packets/IMPLEMENTATION.md").write_text("ACs: AC-1\npaths: src/**\nFAIL findings: none\n",
+                                                                    encoding="utf-8")
+        ev = Path(path).parent / "evidence"
+        ev.mkdir(exist_ok=True)
+        (ev / "dependency-security.json").write_text(
+            json.dumps({"command": "mvn -B org.owasp:dependency-check-maven:check", "exit_code": 0,
+                        "started_at": "2026-10-28T10:00:00Z", "commit": "abc", "worktree_digest": "0", "log": "x.log"}),
+            encoding="utf-8")
         fourth = manifest.apply(path, "IMPLEMENTATION_REVIEW")
         if fourth.status != "PASS":
             res.add("CS-003", BLOCK, "synthetic IMPLEMENTATION_REVIEW must PASS once fit/standards/robustness PASS",
                     evidence=fourth.to_text()[-800:])
+            return
+        # P3: DESIGN -> TESTCASE_DESIGN refused until design_readiness
+        d["current_state"] = "DESIGN"
+        d["gates"] = [{"gate": "requirement_clarity", "status": "PASS"},
+                      {"gate": "acceptance_readiness", "status": "PASS"}]
+        path = _write(root, d, "p3.json")
+        p3_fail = manifest.apply(path, "TESTCASE_DESIGN")
+        if p3_fail.status != "FAIL" or "design_readiness" not in p3_fail.to_text():
+            res.add("CS-003", BLOCK, "synthetic TESTCASE_DESIGN must FAIL until design_readiness PASS (P3)",
+                    evidence=p3_fail.to_text()[-800:])
+            return
+        d["gates"].append({"gate": "design_readiness", "status": "PASS"})
+        path = _write(root, d, "p3-ok.json")
+        (Path(path).parent / "packets").mkdir(exist_ok=True)
+        (Path(path).parent / "packets/DESIGN.md").write_text("ACs: AC-1\noptions: A vs B\nrecommendation: A\n",
+                                                            encoding="utf-8")
+        p3_ok = manifest.apply(path, "TESTCASE_DESIGN")
+        if p3_ok.status != "PASS":
+            res.add("CS-003", BLOCK, "synthetic TESTCASE_DESIGN must PASS once design_readiness is recorded",
+                    evidence=p3_ok.to_text()[-800:])
 
 
 def run() -> Result:
@@ -95,6 +127,16 @@ def run() -> Result:
             elif check.status == "NOT_RUN":
                 res.add("CS-002", BLOCK, f"{platform}: adapter-check not run: {check.summary}", evidence=platform)
     _synthetic(res)
+    if not CI_SPEC.is_file():
+        res.add("CS-005", BLOCK, "ci/crewline.yml missing (spec for GitHub Actions)")
+    else:
+        text = CI_SPEC.read_text(encoding="utf-8")
+        missing = [n for n in CI_NEEDLES if n not in text]
+        if missing:
+            res.add("CS-005", BLOCK, f"ci/crewline.yml missing: {', '.join(missing)}")
+        live = CORE.parent / ".github" / "workflows" / "crewline.yml"
+        if live.is_file() and live.read_text(encoding="utf-8") != text:
+            res.add("CS-005", BLOCK, "live .github/workflows/crewline.yml drifted from ci/crewline.yml")
     res.add("CS-004", INFO,
             "framework kit only. Human P5 (one feature, new machine, every --apply, no Crewline author): "
             + PLAYBOOK.as_posix())

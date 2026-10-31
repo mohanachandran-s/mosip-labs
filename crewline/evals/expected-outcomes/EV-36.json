@@ -1,0 +1,7 @@
+{
+  "id": "EV-36",
+  "expected": "human P5: one feature, new machine, every --apply, no Crewline author",
+  "status": "PENDING_HUMAN",
+  "playbook": "evals/cold-start.md",
+  "must_not": ["Crewline author driving the chat", "skip --apply", "api-internal.released as the branch"]
+}

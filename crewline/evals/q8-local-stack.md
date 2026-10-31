@@ -15,10 +15,24 @@ runs **this branch**.
 4. Point TestRig / `baseUrl` at the same URL.
 5. `python -m crewline branch-env --manifest tasks/<id>/task-manifest.json` must PASS (BEV-004 if you named released).
 
-## Branch-deployed env
+## Branch-deployed env (ask the platform team)
 
-Ask the platform team to deploy **this** branch image to a named non-prod namespace. Health URL must answer.
-`environment_kind=branch-deployed-env`.
+Crewline does not deploy to a cluster. Send this block; do not invent a namespace.
+
+```
+Please deploy THIS branch image to a named non-prod namespace (not released, not prod).
+
+module:        <module>
+repo:          <upstream owner/repo>
+branch:        <task branch>
+commit:        <HEAD sha>
+image:         <what CI already builds, or "build from this commit">
+namespace:     <they name it>
+health URL:    <must answer on the branch build>
+environment_kind: branch-deployed-env
+```
+
+Record their URL on `test_plan.environment`. `crewline branch-env` must PASS.
 
 ## If neither exists this week
 

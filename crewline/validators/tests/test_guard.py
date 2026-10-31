@@ -53,7 +53,12 @@ def write_manifest(tmp_path, **over):
     ("gh pr merge 12", "deny_merge"),
     ("helm upgrade x chart -n production", "deny_prod"),
     ("git commit -s --no-verify -m x", "deny_hooks"),
-    ("mvn -B test", "other"),
+    ("mvn -B test", "deny_raw_suite"),
+    ("python -m crewline run --repo r --out e.json -- mvn -B test", "other"),
+    ("cat src/X.java", "other"),
+    ("cat target/surefire-reports/TEST-x.xml", "deny_dump"),
+    ("cat build.log", "deny_dump"),
+    ("Get-Content full-report.html", "deny_dump"),
 ])
 def test_classify_shell(command, action):
     assert guard.classify_shell(command) == action
@@ -100,6 +105,31 @@ def test_write_outside_approved_paths_blocked(tmp_path):
 
 def test_write_without_task_is_allowed():
     assert guard.check_write("src/main/java/X.java", None).status == "PASS"
+
+
+def test_raw_suite_and_log_dump_are_blocked():
+    assert "GRD-007" in ids(guard.check_shell("mvn -B verify"))
+    assert "GRD-007" in ids(guard.check_shell("cat api-full-report.html"))
+    assert guard.check_shell("python -m crewline run --repo . --out e.json -- mvn -B test").status == "PASS"
+
+
+def test_read_of_dump_or_huge_file_is_blocked(tmp_path):
+    log = tmp_path / "run.log"
+    log.write_text("x", encoding="utf-8")
+    assert "GRD-007" in ids(guard.check_read(str(log)))
+    big = tmp_path / "Huge.java"
+    big.write_bytes(b"x" * (guard.READ_MAX_BYTES + 1))
+    assert "GRD-008" in ids(guard.check_read(str(big)))
+    small = tmp_path / "Svc.java"
+    small.write_text("class Svc {}", encoding="utf-8")
+    assert guard.check_read(str(small)).status == "PASS"
+
+
+def test_hook_read_mode_and_detect():
+    payload = {"hook_event_name": "PreToolUse", "tool_name": "Read", "tool_input": {"path": "build.log"}}
+    assert hook.detect_mode(payload) == "read"
+    out = hook.handle("read", payload)
+    assert out["permission"] == "deny" and "GRD-007" in out["agent_message"]
 
 
 def test_hook_denies_force_push_json():
@@ -164,7 +194,7 @@ def test_install_claude_writes_hooks_and_deny_rules(tmp_path):
     deny = settings["permissions"]["deny"]
     assert "Bash(git push --force *)" in deny
     matchers = [g.get("matcher") for g in settings["hooks"]["PreToolUse"]]
-    assert "Bash|PowerShell" in matchers and "Write|Edit" in matchers      # Windows sessions run PowerShell
+    assert "Bash|PowerShell" in matchers and "Write|Edit" in matchers and "Read" in matchers
     skill = (tmp_path / ".claude" / "skills" / "crewline" / "SKILL.md").read_text(encoding="utf-8")
     assert "{{CORE}}" not in skill
     assert "crewline guard" in skill
@@ -299,6 +329,7 @@ def test_plugin_hooks_cover_bash_powershell_and_writes():
     pre = {g["matcher"]: g["hooks"][0]["command"] for g in spec["PreToolUse"]}
     assert pre["Bash|PowerShell"].endswith("hook --claude --plugin shell")
     assert pre["Write|Edit"].endswith("hook --claude --plugin write")
+    assert pre["Read"].endswith("hook --claude --plugin read")
     assert spec["SessionStart"][0]["hooks"][0]["command"].endswith("hook --claude --plugin session")
 
 

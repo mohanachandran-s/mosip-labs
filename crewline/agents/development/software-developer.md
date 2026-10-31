@@ -33,7 +33,9 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
 1. Read the code you change and its callers first; reuse the existing service/repository/DTO/exception patterns (cite file:line).
 2. Change only files inside `scope.approved_paths`. Need another file? Stop and ask for `scope_change` with the reason.
 3. Write or extend unit tests for every AC you implement; record them in the AC's `test_ids` and the code in `code_refs`.
+   Those fields **are** the hand-off to the SDET: do not paste a narrative or a log into the chat.
 4. Run the module build and the changed modules' tests with `crewline run` (e.g. `mvn -B -pl <module> -am verify`); fix until green.
+   Read the CLIP-002 digest it prints (or `crewline clip --file <record.log>`). Never Read the `.log`.
    Run them with the coverage agent ON (never `-Djacoco.skip=true` for the coverage run) and `jacoco:report`, then
    `crewline diff-coverage`: every changed production line you wrote should be executed by a test (gate >= 80%).
    Run the module's own format/lint checker the same way (spotless:check, checkstyle:check, `npm run lint` — whatever

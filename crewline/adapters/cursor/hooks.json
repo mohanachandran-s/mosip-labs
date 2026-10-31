@@ -12,6 +12,11 @@
         "command": "{{PYTHON}} .cursor/hooks/crewline_hook.py write",
         "matcher": "Write|StrReplace|Edit",
         "failClosed": true
+      },
+      {
+        "command": "{{PYTHON}} .cursor/hooks/crewline_hook.py read",
+        "matcher": "Read",
+        "failClosed": true
       }
     ],
     "sessionStart": [

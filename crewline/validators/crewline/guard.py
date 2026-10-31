@@ -6,6 +6,8 @@
   GRD-004  write outside scope.approved_paths (and no scope_change grant)
   GRD-005  git commit without -s / --signoff
   GRD-006  --no-verify (skipping git hooks)
+  GRD-007  raw dump of a log/report, or a test suite not run through `crewline run`
+  GRD-008  Read of a dump file or a file over read_max_bytes
 
 The Cursor / Claude adapter runs this from a platform hook so the model cannot skip
 `crewline manifest` and still commit. Exit 0 PASS, 1 FAIL, 2 NOT_RUN.
@@ -39,7 +41,21 @@ DENY_RULE = {
     "deny_delete": ("GRD-002", "deleting branches is disabled in this version"),
     "deny_merge": ("GRD-002", "merging the PR is a human action; the agent does not merge"),
     "deny_prod": ("GRD-002", "production deploy is disabled in this version"),
+    "deny_dump": ("GRD-007", "do not cat/type a log or report: use `crewline clip --file <log>`"),
+    "deny_raw_suite": ("GRD-007", "run builds/tests through `crewline run --repo <dir> --out <record> -- <command>`"),
 }
+
+READ_MAX_BYTES = 131072
+DUMP_NAME = re.compile(r"(?i)(\.log$|full-report|error-report|surefire-reports|testng-results|jacoco\.xml)")
+RAW_SUITE = re.compile(
+    r"(^|[\s;&|])((mvn|mvnw)(\.cmd)?\b.*\b(test|verify|install)\b|"
+    r"npm(\.cmd)?\s+t(est)?\b|pytest\b|gradlew?(\.bat)?\s+test\b)",
+    re.I,
+)
+DUMP_CMD = re.compile(
+    r"(^|[\s;&|])(cat|type|less|more|get-content|gc)(\.exe)?\s+",
+    re.I,
+)
 
 
 def find_active_manifest(tasks_dir: Path | None = None, cwd: str | None = None) -> Path | None:
@@ -62,6 +78,10 @@ def find_active_manifest(tasks_dir: Path | None = None, cwd: str | None = None) 
     return max(found)[1] if found else None
 
 
+def _crewline_wrapped(low: str) -> bool:
+    return bool(re.search(r"crewline(\.py)?(\s+\S+){0,8}\s+(run|clip)\b", low))
+
+
 def classify_shell(command: str) -> str:
     """Map a shell command to a guard action: deny_*, commit, push, pr, other."""
     text = (command or "").strip()
@@ -70,6 +90,11 @@ def classify_shell(command: str) -> str:
     low = text.lower()
     if re.search(r"(^|\s)--no-verify(\s|$)", low):
         return "deny_hooks"
+    if not _crewline_wrapped(low):
+        if DUMP_CMD.search(low) and DUMP_NAME.search(low):
+            return "deny_dump"
+        if RAW_SUITE.search(low):
+            return "deny_raw_suite"
     git = bool(re.search(r"(^|[\s;&|])git(\.exe)?\s", low + " ") or low.startswith("git ") or low.startswith("git.exe "))
     if git and re.search(r"\bpush\b", low) and re.search(r"(^|\s)(-f|--force|--force-with-lease)(\s|$)", low):
         return "deny_force"
@@ -226,9 +251,33 @@ def check_write(path: str, manifest_path: str | None = None, cwd: str | None = N
     return res.finish()
 
 
+def check_read(path: str, cwd: str | None = None) -> Result:
+    """Refuse dump files and oversized Reads so the model cannot load a report or a 4k-line class."""
+    res = Result("guard", inputs={"path": path, "action": "read"})
+    if not path:
+        return res.finish()
+    p = Path(path)
+    if not p.is_absolute() and cwd:
+        p = Path(cwd) / p
+    text = str(p).replace("\\", "/")
+    if DUMP_NAME.search(text):
+        res.add("GRD-007", BLOCK, f"do not Read {p.name}: use `crewline clip --file` or a validator", path=text)
+        return res.finish()
+    try:
+        size = p.stat().st_size
+    except OSError:
+        return res.finish()
+    if size > READ_MAX_BYTES:
+        res.add("GRD-008", BLOCK, f"{p.name} is {size} bytes (max {READ_MAX_BYTES}): Grep/clip, do not Read the whole file",
+                path=text, remediation="python -m crewline clip --file <path>")
+    return res.finish()
+
+
 def run(kind: str, target: str, manifest_path: str | None = None, cwd: str | None = None) -> Result:
     if kind == "shell":
         return check_shell(target, manifest_path)
     if kind == "write":
         return check_write(target, manifest_path, cwd)
+    if kind == "read":
+        return check_read(target, cwd)
     return Result.not_run("guard", f"unknown kind {kind!r}")

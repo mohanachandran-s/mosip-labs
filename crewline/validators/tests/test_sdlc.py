@@ -96,6 +96,20 @@ def test_state_off_the_template_path(tmp_path):
 
 
 # --- design approval, independent oracle, reproduction --------------------------------------------
+def test_feature_tests_need_design_readiness(tmp_path):
+    d = doc(current_state="DESIGN",
+            gates=[{"gate": "requirement_clarity", "status": "PASS"},
+                   {"gate": "acceptance_readiness", "status": "PASS"}])
+    res = manifest.transition(write(tmp_path, d), "TESTCASE_DESIGN")
+    assert res.status == "FAIL" and "design_readiness" in res.to_text()
+    d["gates"].append({"gate": "design_readiness", "status": "PASS"})
+    res = manifest.transition(write(tmp_path, d), "TESTCASE_DESIGN")
+    assert res.status == "FAIL" and "PKT-001" in ids(res)
+    (tmp_path / "packets").mkdir(exist_ok=True)
+    (tmp_path / "packets/DESIGN.md").write_text("ACs: AC-1\noptions: A vs B\nrecommendation: A\n", encoding="utf-8")
+    assert manifest.transition(write(tmp_path, d), "TESTCASE_DESIGN").status == "PASS"
+
+
 def test_feature_plan_needs_design_approval_and_tests_first(tmp_path):
     d = doc(current_state="TESTCASE_REVIEW", gates=[{"gate": "design_readiness", "status": "PASS"}])
     res = manifest.transition(write(tmp_path, d), "IMPLEMENTATION_PLAN")
@@ -110,7 +124,38 @@ def test_bug_fix_needs_reproduction_first(tmp_path):
     d = doc(task_type="bug-fix", current_state="TESTCASE_REVIEW")
     assert "reproduction" in " ".join(f.message for f in manifest.transition(write(tmp_path, d), "IMPLEMENTATION_PLAN").findings)
     d["gates"].append({"gate": "reproduction", "status": "PASS"})
+    res = manifest.transition(write(tmp_path, d), "IMPLEMENTATION_PLAN")
+    assert res.status == "FAIL" and "REP-001" in ids(res)
+    ev = tmp_path / "evidence"
+    ev.mkdir()
+    passing = {"command": "mvn -B test -Dtest=Repro", "exit_code": 0, "started_at": "2026-10-28T10:00:00Z",
+               "commit": "abc", "worktree_digest": "0", "log": "x.log"}
+    (ev / "reproduction.json").write_text(json.dumps(passing))
+    assert "REP-002" in ids(manifest.transition(write(tmp_path, d), "IMPLEMENTATION_PLAN"))
+    passing["exit_code"] = 1
+    (ev / "reproduction.json").write_text(json.dumps(passing))
     assert manifest.transition(write(tmp_path, d), "IMPLEMENTATION_PLAN").status == "PASS"
+
+
+def test_leaving_system_test_needs_run_record(tmp_path):
+    d = doc(current_state="SYSTEM_TEST_EXECUTION",
+            gates=[{"gate": "branch_environment", "status": "PASS"}])
+    res = manifest.transition(write(tmp_path, d), "QUALITY_GATE")
+    assert res.status == "FAIL" and "SYS-001" in ids(res)
+    ev = tmp_path / "evidence"
+    ev.mkdir()
+    (ev / "system-tests.json").write_text(json.dumps(
+        {"command": "mvn -B test", "exit_code": 0, "started_at": "2026-10-28T10:00:00Z",
+         "commit": "abc", "worktree_digest": "0", "log": "x.log", "environment": "http://127.0.0.1:8080"}))
+    assert manifest.transition(write(tmp_path, d), "QUALITY_GATE").status == "PASS"
+
+
+def test_implementation_needs_approved_paths(tmp_path):
+    d = doc(current_state="REPO_READY", gates=READY, scope={"module": "svc", "repositories": [], "approved_paths": []})
+    res = manifest.transition(write(tmp_path, d), "IMPLEMENTATION")
+    assert res.status == "FAIL" and "approved_paths" in res.to_text()
+    d["scope"]["approved_paths"] = ["src/main/java/x/**"]
+    assert manifest.transition(write(tmp_path, d), "IMPLEMENTATION").status == "PASS"
 
 
 def test_sdet_path_does_not_need_design_gate(tmp_path):
@@ -325,6 +370,22 @@ def test_run_captures_and_evidence_goes_stale(svc, tmp_path):
     assert "EVD-003" in ids(bad)
     rec = json.loads(out.read_text()); rec.pop("worktree_digest"); out.write_text(json.dumps(rec))
     assert "EVD-001" in ids(evidence.run(str(out), str(svc)))
+    assert "CLIP-002" in ids(res) and "do not Read it" in next(f.message for f in res.findings if f.rule_id == "CLIP-002")
+
+
+def test_clip_keeps_failures_and_caps(tmp_path):
+    from crewline import clip
+    log = tmp_path / "mvn.log"
+    noise = "\n".join(f"Downloading foo-{i}.jar" for i in range(200))
+    log.write_text(noise + "\n[ERROR] compilation failure\nTests run: 3, Failures: 1\nBUILD FAILURE\n", encoding="utf-8")
+    res = clip.run(str(log), 800)
+    assert res.status == "PASS" and "CLIP-002" in ids(res)
+    msg = next(f.message for f in res.findings if f.rule_id == "CLIP-002")
+    assert "BUILD FAILURE" in msg and "Tests run:" in msg and "[ERROR]" in msg
+    assert len(msg) <= 800
+    assert clip.run(str(tmp_path / "missing.log")).status == "NOT_RUN"
+    cmd = clip.run_command([sys.executable, "-c", "print('ok')"])
+    assert cmd.status == "PASS" and "CLIP-002" in ids(cmd)
 
 
 # --- JUnit regression -----------------------------------------------------------------------------------------
@@ -370,6 +431,22 @@ def test_usage_by_stage_and_step(tmp_path):
     assert usage.mark(m, "next step").status == "PASS"
     assert json.loads(Path(m).read_text())["usage_marks"][-1]["label"] == "next step"
     assert "USE-002" in ids(usage.report(write(tmp_path, doc(), "m2.json"), [str(tr)]))
+
+
+def test_ci_spec_has_rails_jobs():
+    spec = Path(__file__).resolve().parents[2] / "ci" / "crewline.yml"
+    text = spec.read_text(encoding="utf-8")
+    for needle in ("python -m pytest", "evals --pack frozen", "adapter", "cold-start"):
+        assert needle in text, needle
+    live = spec.parents[2] / ".github" / "workflows" / "crewline.yml"
+    if live.is_file():
+        assert live.read_text(encoding="utf-8") == text
+
+
+def test_usage_requires_mark_per_transition(tmp_path):
+    d = doc(started_at="2026-10-28T10:00:00Z",
+            state_history=[{"from": "INTAKE", "to": "INPUT_VALIDATION", "at": "2026-10-28T10:01:00Z"}])
+    assert "USE-009" in ids(usage.report(write(tmp_path, d), []))
 
 
 def test_usage_budget_blocks_when_over_cap(tmp_path):
@@ -769,7 +846,24 @@ def test_review_refused_until_coding_standards(tmp_path):
     d["gates"].append({"gate": "robustness", "status": "PASS"})
     assert "requirement_fit" in " ".join(f.message for f in manifest.transition(write(tmp_path, d), "IMPLEMENTATION_REVIEW").findings)
     d["gates"].append({"gate": "requirement_fit", "status": "PASS"})
+    (tmp_path / "packets").mkdir(exist_ok=True)
+    (tmp_path / "packets/IMPLEMENTATION.md").write_text("ACs: AC-1\npaths: src/**\nFAIL findings: none\n", encoding="utf-8")
+    res = manifest.transition(write(tmp_path, d), "IMPLEMENTATION_REVIEW")
+    assert res.status == "FAIL" and "DEPSEC-001" in ids(res)
+    ev = tmp_path / "evidence"
+    ev.mkdir(exist_ok=True)
+    (ev / "dependency-security.json").write_text(json.dumps(
+        {"command": "mvn -B org.owasp:dependency-check-maven:check", "exit_code": 0,
+         "started_at": "2026-10-28T10:00:00Z", "commit": "abc", "worktree_digest": "0", "log": "x.log"}))
     assert manifest.transition(write(tmp_path, d), "IMPLEMENTATION_REVIEW").status == "PASS"
+
+
+def test_review_refused_without_implementation_packet(tmp_path):
+    d = doc(current_state="UNIT_INTEGRATION_TEST",
+            gates=[{"gate": g, "status": "PASS"} for g in
+                   ("deterministic_validation", "coding_standards", "robustness", "requirement_fit")])
+    res = manifest.transition(write(tmp_path, d), "IMPLEMENTATION_REVIEW")
+    assert res.status == "FAIL" and "PKT-001" in ids(res)
 
 
 def test_discover_records_spotless_command(tmp_path):
@@ -991,6 +1085,26 @@ def test_task_queue_new_status_resume(tmp_path, monkeypatch):
     waiting["current_state"] = "WAITING_FOR_USER"
     (tmp_path / "t1" / "task-manifest.json").write_text(json.dumps(waiting), encoding="utf-8")
     assert "TSK-003" in ids(task.run("resume", "t1"))
+    (tmp_path / "t1/packets").mkdir()
+    (tmp_path / "t1/packets/IMPLEMENTATION.md").write_text("ACs: AC-1\n", encoding="utf-8")
+    (tmp_path / "t1/evidence").mkdir()
+    (tmp_path / "t1/evidence/unit.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "t1/evidence/unit.log").write_text("secret-looking noise\n", encoding="utf-8")
+    z = tmp_path / "t1.zip"
+    assert task.run("export", "t1", out=str(z)).status == "PASS"
+    import zipfile
+    names = zipfile.ZipFile(z).namelist()
+    assert "task-manifest.json" in names and "packets/IMPLEMENTATION.md" in names
+    assert "evidence/unit.json" in names and not any(n.endswith(".log") for n in names)
+    assert task.run("import", archive=str(z), task_id="t1-copy").status == "PASS"
+    assert (tmp_path / "t1-copy/task-manifest.json").is_file()
+    waiting["current_state"] = "INTAKE"
+    waiting.pop("resume_state", None)
+    (tmp_path / "t1" / "task-manifest.json").write_text(json.dumps(waiting), encoding="utf-8")
+    started = task.run("start", "t1")
+    assert started.status == "PASS" and "TSK-007" in ids(started) and "INPUT_VALIDATION" in started.to_text()
+
+
 # --- plugin SessionStart hook: active only where .crewline/ exists ---------------------------------------------------
 def test_session_start_activates_only_in_onboarded_repos(tmp_path):
     from crewline import session

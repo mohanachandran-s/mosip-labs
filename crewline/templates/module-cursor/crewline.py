@@ -4,7 +4,7 @@
 Cursor has no plugin marketplace, so this file does the plugin's job: it keeps a cached copy of Crewline
 (mosip/mosip-labs, folder crewline/) under ~/.crewline/, refreshes it at most once a day, and runs it.
 
-  python .cursor/crewline.py hook session|shell|write     Cursor hooks (.cursor/hooks.json): stdin JSON -> stdout JSON
+  python .cursor/crewline.py hook session|shell|write|read     Cursor hooks (.cursor/hooks.json): stdin JSON -> stdout JSON
   python .cursor/crewline.py rule                         the current Crewline rule for this repository (the agent reads it)
   python .cursor/crewline.py where                        path of the cached Crewline core
   python .cursor/crewline.py <command> [args]             any Crewline validator, e.g. `manifest <m> --to DESIGN`
