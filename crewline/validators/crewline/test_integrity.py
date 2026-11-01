@@ -7,8 +7,8 @@
   TIN-005  existing test file modified (only with --strict, e.g. a refactor)                     BLOCK
   TIN-006  expected exception / timeout relaxed (expected=, assertThrows type, timeout raised)   WARN
 
-Covers JUnit 4/5 and TestNG Java sources under src/test/, and Jest/Vitest/Mocha files (`__tests__/`, `*.test.*`,
-`*.spec.*`; `it`/`test` titles, `.skip`/`.todo`/`xit`/`.only`, `expect`/`assert` counts, snapshot/timeout changes). Every BLOCK can be covered by an approval record in
+Covers JUnit 4/5 and TestNG Java under src/test/; Jest/Vitest/Mocha (`__tests__/`, `*.test.*`, `*.spec.*`);
+pytest (`test_*.py`, `*_test.py`, `tests/*.py`); Go (`*_test.go`). Every BLOCK can be covered by an approval record in
 the expected-diff format: {rule_id, target: <path>[::<method>], approver, reason, timestamp}.
 """
 from __future__ import annotations
@@ -19,7 +19,10 @@ from .expected_diff import load_approvals
 from .gitio import changed_files, show, top
 from .result import BLOCK, WARN, Result
 
-TEST_FILE = re.compile(r"(^|/)src/test/.*\.java$|(^|/)__tests__/.*\.[cm]?[jt]sx?$|\.(test|spec)\.[cm]?[jt]sx?$")
+TEST_FILE = re.compile(
+    r"(^|/)src/test/.*\.java$|(^|/)__tests__/.*\.[cm]?[jt]sx?$|\.(test|spec)\.[cm]?[jt]sx?$"
+    r"|(^|/)tests/.*\.py$|(^|/)test_[^/]+\.py$|_test\.py$|_test\.go$"
+)
 JAVA = {
     "method": re.compile(r"@(?:org\.junit\.(?:jupiter\.api\.)?)?Test\b[^\n]*\n(?:\s*@[^\n]*\n)*\s*(?:public\s+|protected\s+|private\s+)?"
                          r"(?:static\s+)?void\s+(\w+)\s*\("),
@@ -32,6 +35,18 @@ JS = {  # Jest / Vitest / Mocha
     "disabled": re.compile(r"\b(?:it|test|describe)\.(?:skip|todo)\s*\(|\bx(?:it|test|describe)\s*\(|\.only\s*\("),
     "assert": re.compile(r"\bexpect\s*\(|\bassert(?:\.\w+)?\s*\("),
     "relax": re.compile(r"\.toMatchSnapshot\s*\(|jest\.setTimeout|\btimeout\s*:"),
+}
+PY = {  # pytest / unittest
+    "method": re.compile(r"\bdef\s+(test_\w+)\s*\("),
+    "disabled": re.compile(r"@pytest\.mark\.(?:skip|skipif)\b|pytest\.skip\s*\(|@unittest\.skip"),
+    "assert": re.compile(r"\bassert\b|\bpytest\.raises\s*\(|\bself\.assert\w+\s*\("),
+    "relax": re.compile(r"pytest\.approx|timeout\s*="),
+}
+GO = {
+    "method": re.compile(r"\bfunc\s+(Test\w+)\s*\("),
+    "disabled": re.compile(r"\bt\.Skip(?:f|Now)?\s*\("),
+    "assert": re.compile(r"\bt\.(?:Error|Fatal|Fail)(?:f|Now)?\s*\(|\bassert\."),
+    "relax": re.compile(r"t\.Parallel\s*\("),
 }
 
 
@@ -55,7 +70,14 @@ def run(repo: str, base: str, approvals_file: str | None = None, strict: bool = 
             continue
         new = (root / path).read_text(encoding="utf-8", errors="replace")
         o, n = _strip_comments(old), _strip_comments(new)
-        rx = JAVA if path.endswith(".java") else JS
+        if path.endswith(".java"):
+            rx = JAVA
+        elif path.endswith(".py"):
+            rx = PY
+        elif path.endswith(".go"):
+            rx = GO
+        else:
+            rx = JS
         for m in sorted(set(rx["method"].findall(o)) - set(rx["method"].findall(n))):
             res.add("TIN-001", BLOCK, f"test removed: {m}", path=path, evidence=f"{path}::{m}")
         if len(rx["disabled"].findall(n)) > len(rx["disabled"].findall(o)):

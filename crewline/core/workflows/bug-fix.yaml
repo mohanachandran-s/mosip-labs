@@ -15,5 +15,5 @@ entry_guards:
     - {gate: robustness, eq: PASS}
     - {gate: requirement_fit, eq: PASS}
 required_gates: [requirement_clarity, acceptance_readiness, reproduction, build, unit_tests, diff_coverage, component_tests, deterministic_validation, coding_standards, robustness, requirement_fit, test_integrity, traceability, full_regression, secrets, change_scope, system_tests, branch_environment, defect_reports, token_budget]
-notes: reproduction PASS means the new or updated test FAILS on the base with the reported symptom; after the fix the same test PASSES on the branch (crewline regression reports REG-006 fixed for it).
+notes: reproduction PASS means evidence/reproduction.json exists with exit_code != 0 (crewline run of the new test on the base). After the fix the same test PASSES on the branch (crewline regression reports REG-006 fixed for it).
 no_silent_na: [system_tests, full_regression]      # SDET always runs them; skipping needs an attributed exception (MAN-015)

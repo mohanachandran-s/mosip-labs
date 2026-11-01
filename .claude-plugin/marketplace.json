@@ -4,12 +4,14 @@
     "name": "MOSIP",
     "url": "https://github.com/mosip"
   },
-  "description": "MOSIP Labs plugins for Claude Code",
+  "metadata": {
+    "description": "MOSIP labs plugins. Install Crewline from this catalog."
+  },
   "plugins": [
     {
       "name": "crewline",
       "source": "./crewline",
-      "description": "Gated, evidence-first AI engineering workflow for MOSIP modules"
+      "description": "Gated, evidence-first AI engineering workflow for MOSIP."
     }
   ]
 }

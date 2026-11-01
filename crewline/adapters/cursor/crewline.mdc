@@ -12,6 +12,18 @@ Load only the current state's one contract, module `.crewline/development/local-
 Never paste reports/logs/validator JSON. Never poll. One specialist. One question. `crewline usage --mark` each step;
 if `crewline usage` FAILs the budget, STOP (WAITING_FOR_USER: continue / split / abort).
 
+**Search, clip, hand off (every turn):**
+- Find code with Read / Grep / Glob after `local-context.md`. Do not `cat` / `find` / `rg` a tree into the chat.
+- Builds, tests, diffs that can flood stdout: `python -m crewline run --repo <dir> --out <record> -- <command>`. Read the
+  CLIP-002 digest it prints (or `python -m crewline clip --file <record.log>`). Never Read the `.log`, a surefire XML, or a
+  TestRig report. Hooks **deny** `cat` of those files, raw `mvn test`/`npm test`/`pytest`, and Read of dump/oversized
+  files (GRD-007/008). RTK is optional for other bash; Crewline does not require it.
+- Developer writes `code_refs`, `test_ids` / `component_test_ids`, evidence paths on the manifest. QA reads those +
+  `.crewline/qa/` + `packets/<state>.md`. Not the chat and not the implementer's notes. Leaving DESIGN needs
+  `packets/DESIGN.md`. A bug-fix IMPLEMENTATION_PLAN needs `evidence/reproduction.json` (failed base run).
+  IMPLEMENTATION needs a non-empty `scope.approved_paths`. Feature / dependency-upgrade review needs
+  `evidence/dependency-security.json`. Leaving SYSTEM_TEST_EXECUTION needs `evidence/system-tests.json`.
+
 1. At **INTAKE only**, read `{{CORE}}/core/principles.md`. Run `python -m crewline pack` and load only that pack's knowledge dirs
    (`packs/<id>/pack.yaml`). MOSIP (default) adds `knowledge/mosip` and `knowledge/frameworks`. Then the target
    repository's `.crewline/development/local-context.md` (staging copy: `<module repo>/.crewline/development/`)

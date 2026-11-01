@@ -49,7 +49,9 @@ gates:
     state: DESIGN
     enforced_by: review+human
     agent: solution-architect
-    requires: [options considered, recommendation with trade-offs, API/DB/compatibility impact, rollback approach, ADR for a material decision, approval design recorded]
+    requires: [options considered, recommendation with trade-offs, API/DB/compatibility impact, rollback approach, ADR for a material decision, approval design recorded, packets/DESIGN.md on disk before leaving DESIGN]
+    note: >-
+      The stamp is not enough. `manifest --to` from DESIGN fails PKT-001 without packets/DESIGN.md.
 
   testcase_readiness:
     state: TESTCASE_REVIEW
@@ -61,13 +63,18 @@ gates:
   reproduction:
     state: TESTCASE_REVIEW
     enforced_by: deterministic
-    requires: [a test that FAILS on the base commit with the reported symptom; command, exit code, report path recorded]
-    note: bug-fix only. The same test must PASS on the branch (regression REG-006 for that id).
+    commands: ["crewline run --repo <base worktree> --out <task>/evidence/reproduction.json -- <failing test>"]
+    requires: [a test that FAILS on the base commit with the reported symptom; evidence/reproduction.json with exit_code != 0]
+    note: >-
+      bug-fix only. The gate stamp is not enough (REP-001/002). The same test must PASS on the branch
+      (regression REG-006 for that id).
 
   plan_readiness:
     state: IMPLEMENTATION_PLAN
     enforced_by: review
     requires: [files/modules to change listed as scope.approved_paths, existing patterns and commons reuse cited, test plan per AC, $ID chain for TestRig cases]
+    note: >-
+      IMPLEMENTATION is refused when scope.approved_paths is empty. The plan stamp is not a file list.
 
   repo_ready:
     state: REPO_READY
@@ -106,8 +113,11 @@ gates:
   dependency_security:
     state: DETERMINISTIC_VALIDATION
     enforced_by: deterministic
-    commands: ["approved scanner (OWASP dependency-check / CodeQL in CI); evidence --record <scan.json>"]
-    requires: [no new HIGH/CRITICAL finding introduced by the change, or an attributed exception]
+    commands: ["crewline run --repo <dir> --out <task>/evidence/dependency-security.json -- <module-named scanner>"]
+    requires: [evidence/dependency-security.json with exit 0, or an attributed exception; no new HIGH/CRITICAL finding]
+    note: >-
+      Feature and dependency-upgrade IMPLEMENTATION_REVIEW fails DEPSEC-001/002 without that record.
+      Use the scanner the module names in `.crewline/development/`. Do not invent a parallel one.
 
   unit_tests:
     state: UNIT_INTEGRATION_TEST
@@ -185,7 +195,8 @@ gates:
   system_tests:
     state: SYSTEM_TEST_EXECUTION
     enforced_by: deterministic
-    requires: [command, environment, exit code, report path, commit SHA, passed/failed/skipped counts, report header Commit Id/Branch Name equals the tested repo HEAD/branch]
+    commands: ["crewline run --repo <dir> --out <task>/evidence/system-tests.json -- <branch-build suite>"]
+    requires: [evidence/system-tests.json with command and exit_code; environment is the branch build, not released]
     note: >-
       SDET runs the new cases AND the module's existing TestRig regression (API/UI/DSL) on an environment running the BRANCH
       build, chosen in the test plan (test_plan.environment_kind): branch-deployed-env (CI image on a dev/qa env) |
@@ -236,7 +247,8 @@ gates:
     state: QUALITY_GATE
     enforced_by: deterministic
     commands: ["usage --manifest <task-manifest.json> --transcript <session.jsonl>"]
-    requires: [task total and per-state totals under core/usage-budget.yaml, specialist packets under packet_max_chars]
+    requires: [task total and per-state totals under core/usage-budget.yaml, specialist packets under packet_max_chars,
+      packets/IMPLEMENTATION.md before IMPLEMENTATION_REVIEW, packets/FRESH_CONTEXT_REVIEW.md before review 2 (PKT-001)]
     on_fail: WAITING_FOR_USER
     note: >-
       Accounting is not protection. Exceeding the budget stops the task. Cursor often has no transcript: the adapter

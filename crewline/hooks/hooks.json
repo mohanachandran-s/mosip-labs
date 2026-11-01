@@ -31,6 +31,16 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/crewline\" hook --claude --plugin read",
+            "timeout": 20
+          }
+        ]
       }
     ]
   }

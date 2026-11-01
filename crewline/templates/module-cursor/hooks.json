@@ -17,6 +17,11 @@
         "command": "python .cursor/crewline.py hook write",
         "matcher": "Write|StrReplace|Edit",
         "failClosed": true
+      },
+      {
+        "command": "python .cursor/crewline.py hook read",
+        "matcher": "Read",
+        "failClosed": true
       }
     ]
   }

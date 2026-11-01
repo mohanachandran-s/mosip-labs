@@ -65,13 +65,18 @@ def _load_lcov(r: Path, cov: dict[str, dict[int, bool]]) -> None:
 def load_reports(path: str) -> tuple[dict[str, dict[int, bool]], float]:
     """JaCoCo '<package>/<File.java>' or lcov 'lcov:<abs path>' -> {line: covered} for executable lines; newest mtime."""
     p = Path(path)
-    reports = [p] if p.is_file() else sorted(p.rglob("jacoco.xml")) + sorted(p.rglob("lcov.info"))
+    reports = [p] if p.is_file() else (
+        sorted(p.rglob("jacoco.xml")) + sorted(p.rglob("lcov.info")) + sorted(p.rglob("coverage.xml")))
     cov: dict[str, dict[int, bool]] = {}
     newest = 0.0
     for r in reports:
         if r.name.endswith(".info"):
             newest = max(newest, r.stat().st_mtime)
             _load_lcov(r, cov)
+            continue
+        if r.name == "coverage.xml":
+            newest = max(newest, r.stat().st_mtime)
+            _load_cobertura(r, cov)
             continue
         newest = max(newest, r.stat().st_mtime)
         parser = ET.XMLParser()
@@ -86,6 +91,21 @@ def load_reports(path: str) -> tuple[dict[str, dict[int, bool]], float]:
                         nr = int(ln.get("nr"))
                         lines[nr] = lines.get(nr, False) or ci > 0
     return cov, newest
+
+
+def _load_cobertura(r: Path, cov: dict[str, dict[int, bool]]) -> None:
+    """pytest-cov / coverage.py coverage.xml: 'cov:<posix path>'."""
+    root = ET.parse(r).getroot()
+    for cls in root.iter("class"):
+        fn = (cls.get("filename") or "").replace("\\", "/")
+        if not fn:
+            continue
+        key = "cov:" + fn.lower()
+        lines = cov.setdefault(key, {})
+        for ln in cls.iter("line"):
+            n, hits = int(ln.get("number", 0)), int(ln.get("hits", 0))
+            if n:
+                lines[n] = lines.get(n, False) or hits > 0
 
 
 def _report_key(path: str) -> str | None:
@@ -113,6 +133,8 @@ def run(repo: str, base: str, jacoco: str, threshold: float = 80.0, include: str
         report = cov.get(key) if key else None
         if report is None:
             report = cov.get("lcov:" + src.resolve().as_posix().lower())
+        if report is None:
+            report = cov.get("cov:" + path.replace("\\", "/").lower())
         if report is None:
             if lines:
                 res.add("DCV-002", BLOCK, f"{path}: not in any JaCoCo report (module tests not run with coverage?)", path=path)

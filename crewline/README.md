@@ -11,15 +11,15 @@ It is run by one orchestrator with specialist agents, deterministic gates and hu
 Cursor and Claude already write code. Crewline is not a better coder — it is the MOSIP flight checklist and the locks on
 commit/push, so a chat cannot pass for a done SDLC. [Why Crewline on Cursor or Claude](#why-crewline-on-cursor-or-claude).
 
-**How you start it:** describe the work in **Cursor** or **Claude Code**. Use the **terminal** for setup, validators and git — there is no `crewline start` command that runs the crew by itself. Details: [How you start it](#how-you-start-it-cursor-claude-or-terminal).
+**How you start it:** describe the work in **Cursor** or **Claude Code**. Use the **terminal** for setup, validators and git — `crewline start` is a conductor (next `--to`), not a crew. Details: [How you start it](#how-you-start-it-cursor-claude-or-terminal).
 
 | | |
 |---|---|
-| Version | `0.1.0` (see `VERSION`) |
+| Version | `0.6.0` (see `VERSION`) |
 | Design | `../AI_Engineering_Agent_Full_SDLC_Implementation_Blueprint_v2.1.html` (authoritative) and `../AI_Engineering_Agent_Full_SDLC_Updated_Plan_v1.3.html` |
 | Lineage | Copied from the SDET Architect Assistant 0.2.0. Its proven workflow is the `test-automation` task type and the `agents/qa/` specialty |
 | Pilots | **PILOT-001** (test automation): [mosip/pre-registration#1088](https://github.com/mosip/pre-registration/pull/1088) · **PILOT-002** (bug fix MOSIP-38854): [mosip/pre-registration#1089](https://github.com/mosip/pre-registration/pull/1089) |
-| Health | 163 validator acceptance tests; evaluation scenarios EV-01..59 (`python -m crewline evals --pack frozen`) |
+| Health | 203 validator acceptance tests; evaluation scenarios EV-01..59 (`python -m crewline evals --pack frozen`) |
 
 ---
 
@@ -204,7 +204,7 @@ fails to run (e.g. PyYAML missing), shell and write actions ask the user instead
 11. [Validators (`crewline`)](#11-validators-crewline)
 12. [Evidence and token usage](#12-evidence-and-token-usage)
 13. [Task manifest](#13-task-manifest)
-14. [Knowledge and module context](#14-knowledge-and-module-context)
+14. [Knowledge and module context](#14-knowledge-and-module-context) · [How agents find and share context](#141-how-agents-find-and-share-context)
 15. [Adapters and installation](#15-adapters-and-installation)
 16. [Running a task, step by step](#16-running-a-task-step-by-step) · [Use it for your module](#use-it-for-your-module)
 17. [Repository layout](#17-repository-layout)
@@ -222,7 +222,7 @@ Crewline is two layers. They are not started the same way.
 | **The crew** | Orchestrator + specialist agents (requirements, design, tests, code, reviews, PR) | Inside an **AI coding tool** that loads the adapter |
 | **The rails** | `python -m crewline …` validators, `crewline guard`, git hooks | **Terminal** and hooks that fire on commit / push / PR |
 
-There is **no** `crewline start "fix MOSIP-123"` (or any other command) that walks Story → tests → PR by itself. You start the crew by talking to Cursor or Claude Code. The terminal sets up the machine and enforces the gates.
+There is **no** command that walks Story → tests → PR by itself. `python -m crewline start --id` only prints the next `manifest --to` (conductor). You start the crew by talking to Cursor or Claude Code. The terminal sets up the machine and enforces the gates.
 
 ```mermaid
 flowchart LR
@@ -238,7 +238,7 @@ flowchart LR
 | **Cursor** | **Yes** | Open the folder that has the module clones. One message with the story or bug (templates in Quick start). The installed rule (`.cursor/rules/crewline.mdc`) is the orchestrator. Cursor has no subagents: each specialist contract is played in turn; fresh-context review is a **new chat**. | Fail-closed hooks: commit / push / `gh pr create` denied until COMMIT_PR gates pass. Force-push, `--no-verify`, hard reset, stash, branch delete, PR merge, production deploy always denied. |
 | **Claude Code** | **Yes** | Same request in that folder. The skill (`.claude/skills/crewline/`) is the orchestrator; specialists are `crewline-*` subagents. Fresh-context review is a **new subagent**. | Same `crewline guard` policy via `.claude/settings.json` `PreToolUse` + `permissions.deny`. Subagent tool allow-lists still apply. |
 | **Another AI tool** | **Yes, if it loads the entry** | Install `--platform generic` (or paste `.crewline/ENTRY.md`). Describe the work the same way. | Git `pre-commit` / `commit-msg` / `pre-push` call `crewline guard`. They cannot see `--no-verify` (git skips hooks); never use it. Prefer Cursor or Claude hooks as well when the tool has them. |
-| **Terminal** | **No** | One-time setup and on-demand checks: `pip install`, `pytest`, `python -m crewline tools`, `cold-start`, `task list/status/resume/new`, `manifest`, `guard`, `run` / `evidence`. You can also `git commit` yourself. | Validators and git hooks still run. `crewline task` is a queue over `tasks/*/task-manifest.json`; it does not walk the crew. |
+| **Terminal** | **No** | One-time setup and on-demand checks: `pip install`, `pytest`, `python -m crewline tools`, `cold-start`, `task list/status/resume/new/start`, `manifest`, `guard`, `run` / `evidence`. You can also `git commit` yourself. | Validators and git hooks still run. `crewline start` / `task start` is a conductor over `tasks/*/task-manifest.json`; it does not walk the crew. |
 
 **Typical path for a MOSIP story**
 
@@ -662,7 +662,8 @@ Run from `validators/`: `python -m crewline [--json] <command> ...`. Exit codes:
 | Command | Rules | Checks |
 |---|---|---|
 | `manifest` | MAN-001..013, TRN-001..003 | schema; template projection; guards; both repair caps; human single-use approvals; reviewer independence; risk tier; required gates; linked repos. `--to <STATE> [--apply]` |
-| `run` / `evidence` | EVD-001..004 | runs the command and records exit code, commit and worktree digest; rejects stale or incomplete records |
+| `run` / `evidence` | EVD-001..004 | runs the command and records exit code, commit and worktree digest; rejects stale or incomplete records. `run` also prints a CLIP-002 digest of the log |
+| `clip` | CLIP-001..002 | digest of a log (`--file`) or of a command (`clip -- <cmd>`); cap `clip_max_chars` |
 | `change-scope` | SCP-001..003 | changed files inside `scope.approved_paths`; CI/build/deploy/config files always need `scope_change` |
 | `test-integrity` | TIN-001..006 | JUnit/TestNG and Jest/Vitest/Mocha: removed, disabled or focused tests, fewer assertions, deleted files; `--strict` for refactors |
 | `diff-coverage` | DCV-001..004 | JaCoCo XML or lcov.info + git diff: share of changed lines tested, missing files, stale reports |
@@ -675,17 +676,17 @@ Run from `validators/`: `python -m crewline [--json] <command> ...`. Exit codes:
 | `defect-reports` | DEF-001..003 | secret-scanned defect attachments |
 | `adapter-check` | ADP-001 | installed adapter matches `adapters/` (`--sync` re-renders) |
 | `evals` | EVAL-001..005 | frozen `automated_by` nodeids; `--pack frozen` needs `expected-outcomes/` |
-| `cold-start` | CS-001..004 | new-machine kit (frozen pack, adapters, synthetic `--apply`) |
-| `task` | TSK-001..004 | queue over `tasks/*/`; not a daemon |
+| `cold-start` | CS-001..005 | new-machine kit (frozen pack, adapters, synthetic `--apply`, CI spec jobs) |
+| `task` | TSK-001..007 | queue over `tasks/*/`; `export`/`import` portable memory (no logs); `start` is a conductor (next `--to`); not a daemon |
 | `migration` | MIG-001..004 | upgrade/rollback and release/revoke pairs; released scripts immutable; destructive statements flagged |
 | `regression` | REG-001..006 | base vs branch from TestRig full reports or surefire XML; pass-to-fail and failing new tests block |
 | `branch` · `dco` | BR-001..005 · DCO-001..002 | fork model; signed-off commits |
 | `secrets` | SEC-001..005 | gitleaks when present; values never printed |
 | `tools` | TOOL-000..002 | capabilities from `core/tools.yaml` + active pack overlay; numbered enable steps |
 | `pack` | PCK-001..002 | show / list / `--set` product pack (`mosip` default, `generic` for a non-MOSIP repo) |
-| `usage` | USE-001..008 | token usage per task/stage/step **and** budget stop (`token_budget` gate); packet size |
+| `usage` | USE-001..009 | token usage per task/stage/step **and** budget stop (`token_budget` gate); packet size; `--apply` stamps a mark (USE-009) |
 | `discover` | DSC-001..009 | module onboarding: reads poms, tests, CI, DB scripts, deploy, guidance, TestRig suites and coding-standard checkers read-only; writes evidence-labelled drafts and a baseline |
-| `guard` | GRD-001..006 | Cursor (and any adapter) hooks: no commit/push/PR without a live task and COMMIT_PR gates; force-push / `--no-verify` / prod deploy always denied |
+| `guard` | GRD-001..008 | commit/push/PR gated; force-push / `--no-verify` / prod always denied; **GRD-007** raw log dump or suite not via `crewline run`; **GRD-008** Read of a dump or file over `read_max_bytes` |
 | `testcase` · `expected-diff` · `scope` · `coverage` | NAME/DEP · EXP-001..009 · SCOPE · COV | API TestRig: IDs, `$ID:` chains, weakened expectations, targeted vs full scope, CoverageCli |
 
 ---
@@ -704,7 +705,8 @@ about 3M tokens per review round and 6.7M waiting on background runs. `crewline 
 **state** exceeds the cap (USE-003/004). That is WAITING_FOR_USER: continue with an attributed exception, split the
 task, or abort. Specialist packets under `tasks/<id>/packets/` over `packet_max_chars` or that dump core/reports also
 FAIL (USE-007/008). Cursor often has no API transcript: USE-006, and the adapter **token fire-break** is the control
-(do not re-read core after INTAKE, do not paste reports, do not poll).
+(do not re-read core after INTAKE, do not paste reports, do not poll). `crewline clip` is the bash-output reducer
+(CLIP-002 on every `crewline run`); RTK is optional for other shell and is not a gate.
 
 The transcript records the API-reported usage of every model call. `crewline usage`
 attributes each call:
@@ -751,6 +753,9 @@ Each task has its own workspace, `<clone>/.crewline-work/tasks/<id>/`, inside th
 
 ## 14. Knowledge and module context
 
+There is no vector index, embedding store or “agent memory” service. Shareable memory is **files in git** (team) and
+**files on disk in the task workspace** (one clone, one task). A new chat starts empty; it reloads those files.
+
 - **Global** (`core/`): principles, workflow, policy — product-neutral. **Pack** (`packs/<id>/`): which knowledge dirs and extra tools load. MOSIP pack points at **Frameworks** (`knowledge/frameworks/`: API TestRig, apitest-commons, UI and DSL rigs) and **MOSIP** (`knowledge/mosip/`: application map, dependencies, glossary). Generic pack loads neither.
 - **Decisions** (`knowledge/decisions/`): ADR-0001..0008, an ADR template, and the open Phase 0 questions.
 - **Module context lives in each module repository**, never in Crewline: `<module repo>/.crewline/`, one folder per role:
@@ -768,6 +773,115 @@ Each task has its own workspace, `<clone>/.crewline-work/tasks/<id>/`, inside th
   PR that adds it to the module repository. Validators read the profile from `<module repo>/.crewline/qa/profile.yaml`
   by default (`--profile` overrides).
 - **Evidence labels:** every claim is Verified (file:line, command, report), Inferred (with reasoning) or Unknown. Secrets and raw logs are never stored.
+
+### 14.1 How agents find and share context
+
+```mermaid
+flowchart LR
+    CODE["Module source + git"]
+    SEARCH["Read · Grep · Glob · git"]
+    DISC["crewline discover<br/>onboarding only"]
+    MOD[".crewline/ in the module repo<br/>team-shared, committed"]
+    PACK["Pack knowledge/ + ADRs<br/>in Crewline, committed"]
+    TASK[".crewline-work/tasks/id/<br/>manifest · packets · evidence<br/>local, not git"]
+    DEV["software-developer"]
+    QA["sdet-architect"]
+    TEAM["Next human or next chat"]
+
+    CODE --> SEARCH
+    DISC --> MOD
+    SEARCH --> DEV
+    SEARCH --> QA
+    MOD --> DEV
+    MOD --> QA
+    PACK --> DEV
+    PACK --> QA
+    DEV -->|"writes code_refs, test_ids,<br/>evidence paths, packet"| TASK
+    TASK -->|"same files, no chat dump"| QA
+    MOD --> TEAM
+    PACK --> TEAM
+    TASK -.->|"only if they share the clone"| TEAM
+```
+
+#### Which tool searches the code
+
+The agent contract lists the tools. Crewline does not ship a code-search product. On Cursor and Claude that is the
+platform’s own **Read**, **Grep**, **Glob** and **Bash** (`git grep`, `git show`, `git diff`, `git log -S`). The
+developer and SDET contracts are `Read, Grep, Glob, Bash, Edit, Write`. Reviewers are read-only (`Read, Grep, Glob, Bash`).
+
+| Step | Tool | What it is for |
+|---|---|---|
+| 1. Orient | Read `.crewline/development/local-context.md` (and `.crewline/qa/` for test work) | default packages, build, test, CI, approved-path globs — **not** the whole repository (principle 10) |
+| 2. Find files | Glob (`**/*Service.java`) | names and layout |
+| 3. Find symbols / strings | Grep / `git grep` | call sites, error codes, existing helpers (commons-first, principle 1) |
+| 4. Read what you will change | Read at **file:line**, at the version the build resolves (principle 4) | the code that actually runs, including `-sources.jar` when the fact is in a dependency |
+| 5. Compare | `git diff` / `git show` on the task worktree | the change, not a chat summary of it |
+| 6. First time on a module | `python -m crewline discover --repo <module> --module <name>` | read-only scan of poms, tests, CI, DB scripts, TestRig suites; writes **drafts** of `.crewline/` |
+| 7. Run a bulky command | `crewline run --repo <dir> --out <record> -- <command>` then `crewline clip --file <record.log>` | full stdout stays on disk; the agent reads a CLIP-002 digest (cap `clip_max_chars`) |
+
+That last step is the Crewline equivalent of [RTK](https://github.com/rtk-ai/rtk) (Rust Token Killer: a shell hook that
+compresses bash output before the model sees it). Crewline does **not** vendor or require RTK. Builds and tests already
+go through `crewline run`; `clip` is what you read. Install RTK yourself if you want the same compression on *other*
+bash (`git status`, `ls`, `rg`) — it is optional and outside the gates.
+
+This search / clip / hand-off loop is also in the adapters (`adapters/cursor/crewline.mdc`, `skills/crewline/SKILL.md`,
+`adapters/generic/ENTRY.md`) and in the orchestrator, software-developer and sdet-architect contracts, so it is agent
+behaviour, not only this README.
+
+After INTAKE the orchestrator does **not** re-read `principles.md` or every agent file. Each specialist gets one contract,
+the module `.crewline/` slice it needs, the manifest, and FAIL findings only (principle 10 / 36, USE-007/008).
+
+#### Three memories (what is shared, what is not)
+
+| Layer | Where | Who sees it | What belongs there |
+|---|---|---|---|
+| **Team memory** | `<module>/.crewline/` committed on the module’s default branch | every clone, every new chat (SessionStart / Cursor bootstrap says “Crewline is ACTIVE” and points here) | how *this* repo builds, tests, deploys; QA profile; known issues; default approved paths |
+| **Product memory** | Crewline `knowledge/` dirs named by the active pack + `knowledge/decisions/` | every Crewline install on that pack | application map, TestRig / commons facts, ADRs. Module facts do **not** live here |
+| **Task memory** | `<clone>/.crewline-work/tasks/<id>/` (gitignored via `.git/info/exclude`) | people who have that clone, or who are handed the folder | `task-manifest.json` (ACs, `code_refs`, `test_ids`, `test_plan`, gates, evidence paths), `packets/<state>.md` (≤ `packet_max_chars`), `evidence/`, `usage.md` |
+
+**Never** treated as shareable memory: the chat transcript, the implementer’s reasoning, a pasted TestRig/surefire/raw
+log, secrets, or a re-paste of `core/`. Fresh-context review is given a **source-only** packet (story, ACs, design,
+diff, validator output, evidence paths) and a new `context_id`.
+
+A teammate who clones the module and opens a new Cursor/Claude session gets team + product memory automatically. They
+do **not** get another person’s task workspace unless that person copies `.crewline-work/tasks/<id>/` or they continue
+on the same machine. The durable hand-off between people is the **PR + the committed `.crewline/` + the story**; the
+durable hand-off between agents on one task is the **manifest and the packet files**.
+
+#### How a developer shares context with agentic QA
+
+SDET designs tests from the ACs **before** the code exists, so QA is not waiting on a dump from the developer. The
+developer then writes pointers the SDET and the gates can consume without re-reading the chat.
+
+| When | What the developer writes | What the SDET / gates read |
+|---|---|---|
+| IMPLEMENTATION | `requirements.acceptance_criteria[].code_refs` — repo-relative `file[:symbol]` that implements the AC | `crewline requirement-fit` / `trace`; SDET at SYSTEM_TEST_EXECUTION |
+| IMPLEMENTATION | `test_ids` / `component_test_ids` — unit and HTTP-boundary tests the developer added | `trace` (TRC-007 when system tests are N/A) |
+| IMPLEMENTATION | `implementation.robustness` (handler reuse, hot-path notes) and `error_paths` for every `api: true` AC | `crewline robustness` |
+| IMPLEMENTATION | `crewline run` evidence paths (build, unit, coverage, linter) | `evidence`, `diff-coverage`, `coding-standards` |
+| each state | orchestrator writes `tasks/<id>/packets/<state>.md` — ACs, approved paths, FAIL rules only | the next specialist, including SDET. Cap: `packet_max_chars` in `core/usage-budget.yaml` |
+
+The SDET already has, from earlier states: approved ACs, the design, `test_plan`, matrix rows / TestRig ids
+(`system_test_ids`), and `.crewline/qa/` (suites, `profile.yaml`, known issues). At SYSTEM_TEST_EXECUTION it reads
+those plus the worktree and the evidence paths. It does **not** receive the developer’s notes. CODE_UNDER_CHANGE
+failures go back through the same manifest (`repair`, `test_results`), not a Slack/chat paste.
+
+If a human developer (not the agent) needs the SDET to pick up a change: put the same fields on the manifest, leave
+the evidence records in `.crewline-work/tasks/<id>/evidence/`, and point the next session at that task id
+(`python -m crewline task resume --id <id>`). Do not paste logs into the chat.
+
+#### Maintaining the shareable part
+
+| Event | Who | What to do |
+|---|---|---|
+| New module | `module-onboarder` + owner | `crewline discover` → owner reviews drafts → documentation PR commits `.crewline/` to the **module** repo |
+| Build / test / CI command changed | module owner (or a documentation task) | update `.crewline/development/local-context.md` and `discovery.json`; keep the Verified commit |
+| TestRig layout or `$ID` extras changed | SDET + owner | update `.crewline/qa/module-context.md` and `profile.yaml` |
+| Task produced a durable fact | `knowledge-curator` at KNOWLEDGE_UPDATE | small delta in pack `knowledge/` **or** `.crewline/qa/` (known issue, not a log). Prefer a link to the module’s own `CLAUDE.md` / `coverage/AGENTS.md` over a copy. Mark superseded entries; do not delete history. Status Verified/Inferred/Unknown + `last_verified` commit |
+| Stale `.crewline/` | next agent | repository guidance wins where it disagrees; fix the draft, do not override the repo |
+
+Refresh rule: if a command in `local-context.md` no longer runs, the file is wrong — do not keep a “tribal” chat note
+instead. Secrets, tokens, personal data and raw reports never go in, either layer.
 
 ---
 
@@ -890,7 +1004,7 @@ crewline/
 ├── scripts/                     setup.bat · setup.sh  (one-time prereqs + optional adapter install)
 ├── knowledge/                   decisions/ (ADR-0001..0008) · frameworks/ · mosip/ · known-issues/
 ├── evals/                       task-scenarios/scenarios.yaml (EV-01..59) · frozen-pack.yaml · cold-start.md · q8-local-stack.md · expected-outcomes/
-├── ci/                          copy of the GitHub workflow (live file: repo-root `.github/workflows/crewline.yml`)
+├── ci/                          GitHub workflow spec (a maintainer with workflow scope copies it to `.github/workflows/crewline.yml`)
 └── tasks/                       task workspaces for a Crewline clone (git-ignored); plugin users: <clone>/.crewline-work/tasks/
 ```
 
@@ -923,19 +1037,17 @@ crewline/
 | Phase | Status |
 |---|---|
 | P0 discovery, P1 shared core, P2 SDET slice | done |
-| P3 requirements/design, P4 development | contracts and gates built; P4 piloted (PILOT-002), P3 design path not yet piloted |
-| P5 integrated feature, P6 security/DevOps, P7 release/SRE, P8 scale | P5 kit: `python -m crewline cold-start`; human feature walk not yet piloted |
+| P3 requirements/design, P4 development | P3 gate built (`design_readiness` + `packets/DESIGN.md` before leaving DESIGN); P4 piloted (PILOT-002). Human design walk still `evals/cold-start.md` |
+| P5 integrated feature, P6 security/DevOps, P7 release/SRE, P8 scale | P5 kit: `cold-start`. Human walk not piloted. P6: scanner record (DEPSEC-001). P7: `ui: true` ACs fail TRC-008; leaving SYSTEM_TEST needs `evidence/system-tests.json` (SYS-001). P8: `crewline start` is a conductor |
 
 **Open questions** (`knowledge/decisions/open-questions.md`):
-- **Q4:** existing ADR conventions in the MOSIP repositories.
-- **Q5:** which local security scanners are approved.
-- **Q8:** a non-production **cluster** that runs the branch build (laptop local-stack recipe is `evals/q8-local-stack.md`; `branch-env` refuses `api-internal.released`).
-- **Q9:** where to host this repository so every clone gets the same rules.
+- **Q8 cluster:** laptop `local-stack` is gated; a branch image on a shared namespace is a **platform-team** request (`evals/q8-local-stack.md` has the template). Crewline does not provision a cluster.
 
-**Known limits:**
-- Production actions are disabled.
-- System tests of production-code changes need Q8 (laptop: local-stack; cluster still a platform-team question).
-- `crewline task` lists/resumes manifests; there is still no `crewline start` that walks the crew.
-- `evals --pack frozen --run` is the two-model contract on the **rails**, not a bake-off that invokes two LLMs.
-- Coverage and test-integrity cover Java (JaCoCo, JUnit/TestNG) and JavaScript/TypeScript (lcov, Jest/Vitest/Mocha); other languages need parsers.
-- The usage tracker depends on the Claude Code transcript format.
+**Known limits (not closable in this repo):**
+- Production actions stay **disabled**.
+- **P5** still needs a stranger on a new machine (`evals/cold-start.md`). The kit and the P3 design gate are automated; the walk is not.
+- **P7** UI/DSL: contracts only. A `ui: true` AC without `system_test_ids` already fails TRC-008.
+- `crewline start` is a conductor (next `--to`). It does not invoke a model.
+- Frozen pack + two-model check is rails-only (`evals --pack frozen --run` on Cursor and on Claude).
+- Cursor has no API transcript (USE-006). `manifest --apply` stamps a usage_mark; missing marks fail USE-009.
+- GitHub Actions for this repo is the spec at `ci/crewline.yml`. A maintainer with workflow scope copies it to `.github/workflows/`.

@@ -24,6 +24,7 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
 ## Produces
 
 - design document (task workspace `design/`)
+- `packets/DESIGN.md` (options, recommendation, impact — required to leave DESIGN)
 - ADR draft for each material decision (knowledge/decisions/ADR-template.md)
 - gate `design_readiness` evidence
 - list of contract changes and migrations for the specialists
@@ -36,6 +37,7 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
 4. State the data impact and hand it to the database-engineer when schema or data change.
 5. Write the rollback approach: feature flag, config toggle, revert-safe migration, or why none is needed.
 6. Ask for approval `design` when the design changes a contract, a schema, a shared library or a security control.
+7. Write `packets/DESIGN.md` before the orchestrator leaves DESIGN. A `design_readiness` stamp without that file fails PKT-001.
 
 ## Must not
 

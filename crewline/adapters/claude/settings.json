@@ -32,6 +32,15 @@
             "command": "{{PYTHON}} .claude/hooks/crewline_hook.py --claude write"
           }
         ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{PYTHON}} .claude/hooks/crewline_hook.py --claude read"
+          }
+        ]
       }
     ],
     "SessionStart": [

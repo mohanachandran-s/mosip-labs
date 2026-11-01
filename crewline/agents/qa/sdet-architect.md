@@ -19,6 +19,9 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
 - approved ACs and design (NOT the implementation diff, during TESTCASE_DESIGN)
 - coverage matrix and module `.crewline/qa/` context
 - pack knowledge dirs (`python -m crewline pack`; MOSIP: knowledge/frameworks/ API TestRig, apitest-commons, UI, DSL)
+- after IMPLEMENTATION: the manifest (`code_refs`, `test_ids`, `system_test_ids`, evidence paths) and
+  `packets/<state>.md` — not the developer's chat or notes. System-test stdout via `crewline run` + CLIP-002 / `clip`,
+  never the raw report.
 
 ## Produces
 
@@ -29,6 +32,7 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
 ## Procedure
 
 1. Design acceptance tests from the ACs and the design only. This keeps the tests an independent oracle; reviewers check that tests trace to ACs, not to the code. MOSIP pack: TestRig YAML + coverage matrix. Generic pack: the formats in the module `.crewline/` (unit/component/system as recorded); `testcase` / `coverage` CLIs are NOT_RUN.
+   Bug-fix: first `crewline run` the new test on the **base** worktree; write `evidence/reproduction.json` with exit_code != 0. IMPLEMENTATION_PLAN is refused without that record (REP-001/002).
 2. Delegate within the SDET specialty: testcase-designer -> testcase-reviewer -> api/ui/dsl-automation -> failure-analyst / defect-analyst. These are the contracts proven in PILOT-001.
 3. For a production-code change, run system tests only against an environment running the branch build; check the report header Commit Id/Branch Name.
    Build the run configuration from knowledge/frameworks/apitestrig.md §6b (`-Dmodules` from the module's

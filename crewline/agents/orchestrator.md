@@ -43,7 +43,9 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
     `python -m crewline requirement-clarity --manifest <m>` and record gates `requirement_clarity` and
     `acceptance_readiness`. Vague or missing ACs, a missing story/bug key, or `open_ambiguities != 0` ->
     WAITING_FOR_USER with one focused question. Do not invent the business rule. Bug-fix and test-automation
-    walk ACCEPTANCE_REVIEW; they cannot skip it.
+    walk ACCEPTANCE_REVIEW; they cannot skip it. Leaving DESIGN needs `packets/DESIGN.md` (options,
+    recommendation — not a stamp). Bug-fix IMPLEMENTATION_PLAN needs `evidence/reproduction.json` from
+    `crewline run` of the new test on the **base** with exit_code != 0 (REP-001/002).
 3b. **Workspace (one clone per repo):** reuse the clone the user already has (`git -C <clone> rev-parse --show-toplevel`);
    clone only with approval when none exists. Create the task worktree at `<clone>/.crewline-work/worktrees/<task-id>` and add `.crewline-work/`
    to `<clone>/.git/info/exclude` (local only, never committed). A base checkout for base-vs-branch runs is
@@ -66,15 +68,17 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
    to cover the added change. If the PR is closed/merged, belongs to someone else's fork, or its base is not upstream, stop and
    ask. Tell the user once that mixing unrelated changes in one PR can slow review; follow their choice.
 5. Linked changes (service + shared library, module + apitest-commons): one base-branch approval, worktree, branch, gate set and PR per repo; dependency PR first; record `version_link`.
-6. IMPLEMENTATION_PLAN: get `scope.approved_paths` from the plan. Any later change outside them -> impact analysis + approval `scope_change` (`crewline change-scope`).
+6. IMPLEMENTATION_PLAN: get `scope.approved_paths` from the plan (non-empty; IMPLEMENTATION is refused if the list is empty). Any later change outside them -> impact analysis + approval `scope_change` (`crewline change-scope`).
 6b. Before IMPLEMENTATION_REVIEW: `python -m crewline coding-standards --repo <dir> --base <base> --manifest <m>`,
     `python -m crewline robustness --repo <dir> --base <base> --manifest <m>`, and
     `python -m crewline requirement-fit --repo <dir> --base <base> --manifest <m>`. Missing linters, debug leftovers,
     empty/swallowed catch, raw `throws Exception`, sleep on the hot path, missing API error-path tests, or a diff
-    that does not contain the AC observables -> stay in IMPLEMENTATION. Do not delegate to the code-reviewer until
-    gates `coding_standards`, `robustness` and `requirement_fit` are PASS.
+    that does not contain the AC observables -> stay in IMPLEMENTATION. Feature / dependency-upgrade: write
+    `evidence/dependency-security.json` via `crewline run` of the scanner the module names (DEPSEC-001/002).
+    Do not delegate to the code-reviewer until gates `coding_standards`, `robustness` and `requirement_fit` are PASS.
 6c. Before SYSTEM_TEST_EXECUTION: `python -m crewline branch-env --manifest <m>`. A released-only env is not the
-    branch (Q8). Before QUALITY_GATE: `python -m crewline defect-reports --manifest <m>`.
+    branch (Q8). Record the suite with `crewline run --out <task>/evidence/system-tests.json`. Leaving that
+    state without the file fails SYS-001. Before QUALITY_GATE: `python -m crewline defect-reports --manifest <m>`.
 6d. After installing or upgrading Crewline: `python -m crewline adapter-check --platform <p> --target <workspace> --sync`.
     Drift without --sync is ADP-001. `python -m crewline evals --pack frozen` must PASS. A new machine runs
     `python -m crewline cold-start` before a MOSIP story (`evals/cold-start.md` is the human P5).
@@ -91,7 +95,10 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
 14. Token fire-break: set `started_at` / `initial_state` at INTAKE. After INTAKE do **not** re-read `principles.md`,
     `workflow.yaml`, or every agent contract. Each state: one contract file + module `.crewline/` context + the
     manifest + FAIL findings. Write that packet under `tasks/<id>/packets/<state>.md` (ACs, paths, FAIL rules only;
-    max `packet_max_chars` in `core/usage-budget.yaml`). Never paste a TestRig/surefire/full log. Never poll
+    max `packet_max_chars` in `core/usage-budget.yaml`). Search with Read / Grep / Glob after module `.crewline/`.
+    Bulky commands through `crewline run`; specialists read CLIP-002 / `crewline clip`, never the `.log` or a
+    TestRig/surefire report. Developer → QA is the manifest (`code_refs`, `test_ids`, evidence paths) plus the packet,
+    not the chat. Never poll
     (AwaitShell / PR monitor event). One focused WAITING_FOR_USER question. `python -m crewline usage --manifest <m>
     --mark "<step>"` at each step; at every stage change and before QUALITY_GATE run `python -m crewline usage
     --manifest <m> --transcript <session.jsonl>`. FAIL (USE-003/004/007/008) -> WAITING_FOR_USER (continue / split /

@@ -21,8 +21,9 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import clip
 from .gitio import head, worktree_digest
-from .result import BLOCK, Result
+from .result import BLOCK, INFO, Result
 
 REQUIRED = ("command", "exit_code", "started_at", "commit", "worktree_digest", "log")
 
@@ -49,6 +50,11 @@ def capture(repo: str, out: str, command: list[str], report: str | None = None, 
         rec["report"] = str(Path(report).resolve())
     outp.write_text(json.dumps(rec, indent=2) + "\n", encoding="utf-8")
     res.inputs.update(record=str(outp), exit_code=rec["exit_code"])
+    try:
+        res.add("CLIP-002", INFO, clip.digest_text(log.read_text(encoding="utf-8", errors="replace"), str(log)),
+                path=str(log))
+    except OSError:
+        pass
     if rec["exit_code"] != 0:
         res.add("EVD-003", BLOCK, f"exit code {rec['exit_code']} (log {log})")
     return res.finish()
