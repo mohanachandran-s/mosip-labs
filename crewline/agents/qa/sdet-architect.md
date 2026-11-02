@@ -49,7 +49,14 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
    YAML, UI features). Missing -> build it in this task (testcase-designer -> api-automation / ui-automation), in parallel
    with the developer. Record the ids in the AC's `system_test_ids` (TRC-008).
 3. **Run before the PR (SYSTEM_TEST_EXECUTION):** new cases plus the regression suites on the branch build; record results in
-   `test_results` (TRC-009) and the base-vs-branch comparison in `full_regression`.
+   `test_results` (TRC-009) and the base-vs-branch comparison in `full_regression`. The suites are the ones the module
+   declares in `.crewline/module.yaml` (`stack.api_test`, `ui_test_projects`, `system_test_projects`) and documents in
+   `.crewline/qa/` (e.g. `ui-test-context.md`). One `crewline run` record per suite in
+   `evidence/system-tests[-<suite>].json`; a unit/jest run or a hand-made check is not one (SYS-002), and a change to a
+   UI project needs the UI rig (SYS-003). Compare base vs branch per suite with
+   `crewline regression --out <task>/evidence/full-regression[-<suite>].json` (REG-007/008; Cucumber JSON for UI rigs).
+   A suite that cannot run on the chosen environment is an attributed `system_tests` / `full_regression` exception,
+   never a silent substitute.
 4. **Bug raising -> bug fixing:** every failure becomes a `defects` entry after triage. CODE_UNDER_CHANGE -> developer fixes it,
    status `fixed` once the same test passes. Pre-existing APPLICATION/SECURITY -> defect-analyst raises the bug with the run
    report (status `raised`, `bug` key) or the user defers it with a reason. The PR is refused while MAN-014 finds one open.

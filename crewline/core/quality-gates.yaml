@@ -6,6 +6,10 @@
 # MOSIP TestRig / CoverageCli commands (`testcase`, `expected-diff`, `coverage`, `scope`) apply when the active
 # pack has sdet.testrig / coverage_cli (default: mosip). Generic pack: those CLIs return NOT_RUN; fill the same
 # gates with the module's own suite via `crewline run` / `regression` / `trace`.
+# Code task types leave REQUIREMENT_ANALYSIS, ACCEPTANCE_REVIEW, IMPACT_ANALYSIS, TESTCASE_DESIGN and TESTCASE_REVIEW only
+# with the specialist's packets/<STATE>.md (`agent:` a Crewline agent, not the orchestrator; `context_id:`) (PKT-001/004).
+# Evidence checks (SYS-*, REG-007/008, PKT-004) refuse missing or malformed records; a hand-typed record that has every
+# field is still honour-system and is for review to catch.
 version: 2
 
 gates:
@@ -195,8 +199,8 @@ gates:
   system_tests:
     state: SYSTEM_TEST_EXECUTION
     enforced_by: deterministic
-    commands: ["crewline run --repo <dir> --out <task>/evidence/system-tests.json -- <branch-build suite>"]
-    requires: [evidence/system-tests.json with command and exit_code; environment is the branch build, not released]
+    commands: ["crewline run --repo <module>/<suite> --out <task>/evidence/system-tests[-<suite>].json -- <branch-build suite>"]
+    requires: ["evidence/system-tests.json with command and exit_code (SYS-001)", "a record runs a system suite the module declares in .crewline/module.yaml - stack.api_test, ui_test_projects, system_test_projects (SYS-002)", "a change to stack.node_projects has a UI rig run (SYS-003)", "environment is the branch build, not released"]
     note: >-
       SDET runs the new cases AND the module's existing TestRig regression (API/UI/DSL) on an environment running the BRANCH
       build, chosen in the test plan (test_plan.environment_kind): branch-deployed-env (CI image on a dev/qa env) |
@@ -209,7 +213,8 @@ gates:
     enforced_by: deterministic
     note: targeted runs are fine while iterating; this full run is required once before commit
     procedure: [unit/component suites base vs branch AND the TestRig system suites base vs branch (same env, sequential)]
-    commands: ["regression --baseline <base report> --candidate <branch report> --allow-fail <id with attributed exception>"]
+    commands: ["regression --baseline <base report> --candidate <branch report> --out <task>/evidence/full-regression[-<suite>].json --allow-fail <id with attributed exception>"]
+    requires: ["code task types - a PASS full-regression record before COMMIT_PR (REG-007)", "one record compares a system suite the module declares (REG-008)", "reports - TestRig full-report HTML, JUnit/Surefire XML, Cucumber JSON (UI rig)"]
     blocks_on: [PASS->FAIL on branch, new test failing without exception]
     scope_rule: "crewline scope (TestRig) / changed modules (unit): only new tests added -> those tests (+ producers); anything else -> FULL"
 

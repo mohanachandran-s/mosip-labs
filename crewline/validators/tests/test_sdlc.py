@@ -65,6 +65,33 @@ def ids(res):
     return {f.rule_id for f in res.findings}
 
 
+def specialist(tmp_path, state, agent="acceptance-reviewer"):
+    """packets/<STATE>.md written by the specialist that did the state (PKT-004)."""
+    (tmp_path / "packets").mkdir(exist_ok=True)
+    (tmp_path / "packets" / f"{state}.md").write_text(f"agent: {agent}\ncontext_id: ctx-{state.lower()}\nverdict: PASS\n")
+
+
+def regression_record(tmp_path, candidate="branch-report", status="PASS", name="full-regression.json", baseline="base-report", **inputs):
+    """evidence/full-regression*.json as `crewline regression --out` writes it (REG-007)."""
+    from crewline import systest
+    if not (tmp_path / ".git").is_dir():                         # reports live in a checkout, as on a real branch
+        git(tmp_path, "init", "-q")
+        (tmp_path / ".git/info/exclude").write_text("*.json\nevidence/\npackets/\nevidence-old/\n")
+        git(tmp_path, "-c", "user.name=T", "-c", "user.email=t@example.org", "commit", "-q", "--allow-empty", "-m", "base")
+    (tmp_path / "evidence").mkdir(exist_ok=True)
+    for side in (baseline, candidate):
+        (tmp_path / side).parent.mkdir(parents=True, exist_ok=True)
+        if not (tmp_path / side).exists():
+            (tmp_path / side).write_text(json.dumps([{"name": side}]))
+    fields = {"baseline": str(tmp_path / baseline), "candidate": str(tmp_path / candidate),
+              "baseline_sha256": systest.report_sha256(tmp_path / baseline),
+              "candidate_sha256": systest.report_sha256(tmp_path / candidate),
+              "commit": systest.repo_head(tmp_path / candidate), "worktree_digest": systest.repo_digest(tmp_path / candidate)}
+    fields.update(inputs)
+    (tmp_path / "evidence" / name).write_text(json.dumps(
+        {"validator": "full-regression", "status": status, "summary": "", "findings": [], "inputs": fields}))
+
+
 # --- one orchestrator, templated paths ------------------------------------------------------------
 @pytest.mark.parametrize("task_type,src,expected", [
     ("feature", "IMPACT_ANALYSIS", ["DESIGN"]),
@@ -112,6 +139,7 @@ def test_feature_tests_need_design_readiness(tmp_path):
 
 def test_feature_plan_needs_design_approval_and_tests_first(tmp_path):
     d = doc(current_state="TESTCASE_REVIEW", gates=[{"gate": "design_readiness", "status": "PASS"}])
+    specialist(tmp_path, "TESTCASE_REVIEW", "testcase-reviewer")
     res = manifest.transition(write(tmp_path, d), "IMPLEMENTATION_PLAN")
     msg = " ".join(f.message for f in res.findings)
     assert res.status == "FAIL" and "testcase_readiness" in msg and "'design'" in msg
@@ -122,6 +150,7 @@ def test_feature_plan_needs_design_approval_and_tests_first(tmp_path):
 
 def test_bug_fix_needs_reproduction_first(tmp_path):
     d = doc(task_type="bug-fix", current_state="TESTCASE_REVIEW")
+    specialist(tmp_path, "TESTCASE_REVIEW", "testcase-reviewer")
     assert "reproduction" in " ".join(f.message for f in manifest.transition(write(tmp_path, d), "IMPLEMENTATION_PLAN").findings)
     d["gates"].append({"gate": "reproduction", "status": "PASS"})
     res = manifest.transition(write(tmp_path, d), "IMPLEMENTATION_PLAN")
@@ -146,8 +175,176 @@ def test_leaving_system_test_needs_run_record(tmp_path):
     ev.mkdir()
     (ev / "system-tests.json").write_text(json.dumps(
         {"command": "mvn -B test", "exit_code": 0, "started_at": "2026-10-28T10:00:00Z",
-         "commit": "abc", "worktree_digest": "0", "log": "x.log", "environment": "http://127.0.0.1:8080"}))
+         "commit": "abc", "worktree_digest": "0", "log": "x.log", "environment": "http://127.0.0.1:8080", "cwd": str(tmp_path)}))
     assert manifest.transition(write(tmp_path, d), "QUALITY_GATE").status == "PASS"
+
+
+def ui_module(tmp_path):
+    """A module repo whose .crewline/module.yaml declares api-test, ui-test and a UI source project."""
+    repo = tmp_path / "mod"
+    (repo / ".crewline").mkdir(parents=True)
+    (repo / ".crewline/module.yaml").write_text(
+        "module: m\nstack:\n  node_projects: [web-ui]\n  ui_test_projects: [ui-test]\n  api_test: true\n")
+    return repo
+
+
+def run_record(cwd, command, exit_code=0):
+    return {"command": command, "cwd": str(cwd), "exit_code": exit_code, "started_at": "2026-11-02T10:00:00Z",
+            "commit": "abc", "worktree_digest": "0", "log": "x.log"}
+
+
+def test_system_tests_must_run_the_module_suites(tmp_path):
+    repo = ui_module(tmp_path)
+    d = doc(current_state="SYSTEM_TEST_EXECUTION", gates=[{"gate": "branch_environment", "status": "PASS"}],
+            scope={"module": "m", "repositories": [{"name": "m", "path": str(repo)}], "approved_paths": ["web-ui/src/**"]})
+    ev = tmp_path / "evidence"
+    ev.mkdir()
+    # a jest run of the UI source, or a hand-made check, is not a system test (the INJIVERIFY-2464 hole)
+    (ev / "system-tests.json").write_text(json.dumps(run_record(repo / "web-ui", "npx jest")))
+    res = manifest.transition(write(tmp_path, d), "QUALITY_GATE")
+    assert res.status == "FAIL" and "SYS-002" in ids(res)
+    # the API suite alone does not cover a UI change
+    (ev / "system-tests.json").write_text(json.dumps(run_record(repo / "api-test", "java -jar target/apitest.jar")))
+    res = manifest.transition(write(tmp_path, d), "QUALITY_GATE")
+    assert res.status == "FAIL" and "SYS-003" in ids(res)
+    # naming the UI rig in a command does not run it: jest with a ui-test pattern, or an echo from the repo root
+    (ev / "system-tests-ui.json").write_text(json.dumps(run_record(repo / "web-ui", "npx jest --testPathPattern=ui-test")))
+    assert "SYS-003" in ids(manifest.transition(write(tmp_path, d), "QUALITY_GATE"))
+    (ev / "system-tests-ui.json").write_text(json.dumps(run_record(repo, "cmd /c echo ui-test")))
+    assert "SYS-003" in ids(manifest.transition(write(tmp_path, d), "QUALITY_GATE"))
+    # a hand-written record (no crewline run fields) is refused
+    (ev / "system-tests-ui.json").write_text(json.dumps({"command": "mvn test", "cwd": str(repo / "ui-test"), "exit_code": 0}))
+    assert "SYS-001" in ids(manifest.transition(write(tmp_path, d), "QUALITY_GATE"))
+    # a crewline run inside the UI rig; with suffixed files only (no system-tests.json)
+    (ev / "system-tests.json").rename(ev / "system-tests-api.json")
+    (ev / "system-tests-ui.json").write_text(json.dumps(
+        run_record(repo / "ui-test", "mvn -DskipTests=false -Dsurefire.suiteXmlFiles=testNgXmlFiles/TestNg.xml test", exit_code=1)))
+    res = manifest.transition(write(tmp_path, d), "QUALITY_GATE")
+    assert res.status == "PASS" and "SYS-005" in ids(res)                       # failures warn: triage them as defects
+    # a UI project at the repo root (discover writes ".") touches every change
+    (repo / ".crewline/module.yaml").write_text("module: m\nstack:\n  node_projects: [.]\n  ui_test_projects: [ui-test]\n  api_test: true\n")
+    d["scope"]["approved_paths"] = ["src/components/Upload.tsx"]
+    (ev / "system-tests-ui.json").unlink()
+    assert "SYS-003" in ids(manifest.transition(write(tmp_path, d), "QUALITY_GATE"))
+    # a backend-only change needs no UI run
+    (repo / ".crewline/module.yaml").write_text("module: m\nstack:\n  node_projects: [web-ui]\n  ui_test_projects: [ui-test]\n  api_test: true\n")
+    d["scope"]["approved_paths"] = ["svc/src/**"]
+    assert manifest.transition(write(tmp_path, d), "QUALITY_GATE").status == "PASS"
+
+
+def test_system_tests_unchecked_without_declared_suites(tmp_path):
+    d = doc(current_state="SYSTEM_TEST_EXECUTION", gates=[{"gate": "branch_environment", "status": "PASS"}])
+    (tmp_path / "evidence").mkdir()
+    (tmp_path / "evidence/system-tests.json").write_text(json.dumps(run_record(tmp_path, "pytest -q")))
+    res = manifest.transition(write(tmp_path, d), "QUALITY_GATE")
+    assert res.status == "PASS" and "SYS-004" in ids(res)
+
+
+def test_commit_needs_a_system_suite_regression_record(tmp_path):
+    repo = ui_module(tmp_path)
+    gates = [{"gate": g, "status": "PASS"} for g in ["quality_gate", "full_regression", "secrets"] + manifest.load_template("bug-fix")["required_gates"]]
+    d = doc(task_type="bug-fix", current_state="QUALITY_GATE", gates=gates, approvals=[{"action": "commit_pr", **HUMAN}],
+            scope={"module": "m", "repositories": [{"name": "m", "path": str(repo)}], "approved_paths": ["web-ui/src/**"]})
+    res = manifest.transition(write(tmp_path, d), "COMMIT_PR")
+    assert res.status == "FAIL" and "REG-007" in ids(res)                       # the stamp alone
+    regression_record(tmp_path, candidate="web-ui/coverage")                     # unit-suite regression only
+    res = manifest.transition(write(tmp_path, d), "COMMIT_PR")
+    assert res.status == "FAIL" and "REG-008" in ids(res)
+    # only the candidate (branch) report counts: a system-suite baseline with a unit-suite candidate is not one
+    regression_record(tmp_path, candidate="web-ui/coverage", baseline="mod/ui-test/target/cucumber.json")
+    assert "REG-008" in ids(manifest.transition(write(tmp_path, d), "COMMIT_PR"))
+    ui = "mod/ui-test/target/cucumber.json"
+    regression_record(tmp_path, candidate=ui, status="FAIL", name="full-regression-ui.json")
+    res = manifest.transition(write(tmp_path, d), "COMMIT_PR")
+    assert res.status == "FAIL" and "REG-007" in ids(res)                       # a break blocks
+    # a hand-written record (no hashes / commit), or one comparing a report with itself, is refused
+    (tmp_path / "evidence/full-regression-ui.json").write_text(json.dumps(
+        {"validator": "full-regression", "status": "PASS", "inputs": {"candidate": str(repo / "ui-test/target/cucumber.json")}}))
+    res = manifest.transition(write(tmp_path, d), "COMMIT_PR")
+    assert "REG-007" in ids(res) and "REG-008" in ids(res)
+    regression_record(tmp_path, candidate=ui, name="full-regression-ui.json", candidate_sha256="b" * 64)
+    assert "REG-007" in ids(manifest.transition(write(tmp_path, d), "COMMIT_PR"))
+    regression_record(tmp_path, candidate=ui, baseline=ui, name="full-regression-ui.json")          # report vs itself
+    assert "REG-007" in ids(manifest.transition(write(tmp_path, d), "COMMIT_PR"))
+    regression_record(tmp_path, candidate=ui, name="full-regression-ui.json", commit="")
+    assert "REG-007" in ids(manifest.transition(write(tmp_path, d), "COMMIT_PR"))
+    regression_record(tmp_path, candidate=ui, name="full-regression-ui.json")
+    assert manifest.transition(write(tmp_path, d), "COMMIT_PR").status == "PASS"
+    # stale: the code changed after the run (uncommitted), or the report changed
+    (repo / "web-ui").mkdir(exist_ok=True)
+    (repo / "web-ui/App.tsx").write_text("export const x = 2;\n")
+    res = manifest.transition(write(tmp_path, d), "COMMIT_PR")
+    assert "REG-007" in ids(res) and "uncommitted" in res.to_text()
+    regression_record(tmp_path, candidate=ui, name="full-regression-ui.json")
+    (tmp_path / ui).write_text("[]")
+    res = manifest.transition(write(tmp_path, d), "COMMIT_PR")
+    assert "REG-007" in ids(res) and "report changed" in res.to_text()
+    regression_record(tmp_path, candidate=ui, name="full-regression-ui.json")
+    assert "REG-007" in ids(manifest.transition(write(tmp_path, d), "COMMIT_PR"))   # every record must be fresh
+    regression_record(tmp_path, candidate="web-ui/coverage", baseline="mod/ui-test/target/cucumber.json")
+    assert manifest.transition(write(tmp_path, d), "COMMIT_PR").status == "PASS"
+    # documentation tasks never need one
+    d2 = doc(task_type="documentation", current_state="QUALITY_GATE", approvals=[{"action": "commit_pr", **HUMAN}],
+             gates=[{"gate": g, "status": "PASS"} for g in ["quality_gate"] + manifest.load_template("documentation")["required_gates"]])
+    (tmp_path / "evidence").rename(tmp_path / "evidence-old")
+    assert "REG-007" not in ids(manifest.transition(write(tmp_path, d2), "COMMIT_PR"))
+
+
+def test_specialist_states_need_the_specialists_packet(tmp_path):
+    d = doc(current_state="ACCEPTANCE_REVIEW", gates=[{"gate": "input_readiness", "status": "PASS"},
+                                                      {"gate": "requirement_clarity", "status": "PASS"},
+                                                      {"gate": "acceptance_readiness", "status": "PASS"}])
+    res = manifest.transition(write(tmp_path, d), "IMPACT_ANALYSIS")
+    assert res.status == "FAIL" and "PKT-001" in ids(res)                       # passed in seconds, no work on disk
+    specialist(tmp_path, "ACCEPTANCE_REVIEW", agent="crewline-orchestrator")
+    res = manifest.transition(write(tmp_path, d), "IMPACT_ANALYSIS")
+    assert res.status == "FAIL" and "PKT-004" in ids(res)                       # the orchestrator reviewing itself
+    for made_up in ("me", "claude", "crewline:orchestrator"):
+        specialist(tmp_path, "ACCEPTANCE_REVIEW", agent=made_up)
+        assert "PKT-004" in ids(manifest.transition(write(tmp_path, d), "IMPACT_ANALYSIS")), made_up
+    for real in ("acceptance-reviewer", "crewline-acceptance-reviewer", "crewline:product:acceptance-reviewer"):
+        specialist(tmp_path, "ACCEPTANCE_REVIEW", agent=real)
+        assert manifest.transition(write(tmp_path, d), "IMPACT_ANALYSIS").status == "PASS", real
+    # non-code task types keep 0.6.0 behaviour
+    d = doc(task_type="documentation", current_state="IMPACT_ANALYSIS")
+    assert "PKT-001" not in ids(manifest.transition(write(tmp_path / "packets", d), "IMPLEMENTATION_PLAN"))
+
+
+def test_regression_reads_cucumber_json(tmp_path):
+    def feature(results):
+        steps = [{"name": f"s{i}", "result": {"status": s}} for i, s in enumerate(results)]
+        return {"name": "Upload", "elements": [
+            {"type": "background", "steps": [{"name": "open", "result": {"status": "passed"}}]},
+            {"type": "scenario", "id": "upload;svg-template-error", "name": "SVG template error", "steps": steps},
+            {"type": "scenario", "id": "upload;png", "name": "png", "steps": [{"name": "s", "result": {"status": "passed"}}]}]}
+    base, cand = tmp_path / "base", tmp_path / "cand"
+    base.mkdir(); cand.mkdir()
+    (base / "cucumber.json").write_text(json.dumps([feature(["passed", "passed"])]))
+    (cand / "cucumber.json").write_text(json.dumps([feature(["passed", "failed"])]))
+    res = regression.run(str(base), str(cand))
+    assert res.status == "FAIL" and "REG-001" in ids(res)
+    assert any("Upload#upload;svg-template-error" in f.message for f in res.findings)
+    (cand / "cucumber.json").write_text(json.dumps([feature(["passed", "undefined"])]))
+    assert "REG-003" in ids(regression.run(str(base), str(cand / "cucumber.json")))
+    (cand / "cucumber.json").write_text(json.dumps([feature(["passed", "passed"])]))
+    res = regression.run(str(base), str(cand))
+    assert res.status == "PASS" and res.inputs["candidate_counts"]["PASS"] == 2
+
+
+def test_regression_out_writes_the_record(tmp_path):
+    for side in ("b", "c"):
+        (tmp_path / side).mkdir()
+        (tmp_path / side / "cucumber.json").write_text(json.dumps(
+            [{"name": "F", "elements": [{"id": "f;a", "steps": [{"result": {"status": "passed"}}]}]}]))
+    out = tmp_path / "task/evidence/full-regression-ui.json"
+    r = subprocess.run([sys.executable, "-m", "crewline", "regression", "--baseline", str(tmp_path / "b"),
+                        "--candidate", str(tmp_path / "c"), "--out", str(out)], capture_output=True, text=True,
+                       cwd=Path(__file__).resolve().parents[1])
+    assert r.returncode == 0, r.stdout + r.stderr
+    rec = json.loads(out.read_text())
+    assert rec["validator"] == "full-regression" and rec["status"] == "PASS"
+    assert rec["inputs"]["candidate"] == str((tmp_path / "c").resolve())
+    assert len(rec["inputs"]["candidate_sha256"]) == 64 and "commit" in rec["inputs"]
 
 
 def test_implementation_needs_approved_paths(tmp_path):
@@ -160,6 +357,7 @@ def test_implementation_needs_approved_paths(tmp_path):
 
 def test_sdet_path_does_not_need_design_gate(tmp_path):
     d = doc(task_type="test-automation", current_state="TESTCASE_REVIEW", gates=[{"gate": "testcase_readiness", "status": "PASS"}])
+    specialist(tmp_path, "TESTCASE_REVIEW", "testcase-reviewer")
     assert manifest.transition(write(tmp_path, d), "IMPLEMENTATION_PLAN").status == "PASS"
 
 
@@ -221,6 +419,7 @@ def test_commit_needs_every_template_gate(tmp_path):
     base = ["quality_gate", "full_regression", "secrets"]
     d = doc(current_state="QUALITY_GATE", gates=[{"gate": g, "status": "PASS"} for g in base],
             approvals=[{"action": "commit_pr", **HUMAN}])
+    regression_record(tmp_path)
     res = manifest.transition(write(tmp_path, d), "COMMIT_PR")
     missing = {f.message.split()[2] for f in res.findings if f.rule_id == "MAN-012"}
     assert {"design_readiness", "unit_tests", "test_integrity", "traceability", "change_scope"} <= missing
@@ -728,6 +927,7 @@ def test_sdet_required_in_code_flows(tmp_path):
     d = doc(current_state="QUALITY_GATE", gates=gates, approvals=[{"action": "commit_pr", **HUMAN}],
             defects=[{"id": "D1", "class": "CODE_UNDER_CHANGE", "status": "open", "found_by": "TC_x_Ui_01"},
                      {"id": "D2", "class": "APPLICATION", "status": "open", "found_by": "TC_x_Reg_07"}])
+    regression_record(tmp_path)
     found = [f.rule_id for f in manifest.transition(write(tmp_path, d), "COMMIT_PR").findings]
     assert "MAN-015" in found and found.count("MAN-014") == 2
     d["defects"][0]["status"] = "fixed"
@@ -960,6 +1160,7 @@ def test_requirement_clarity_skips_non_story_types(tmp_path):
 
 def test_impact_refused_until_requirement_clarity(tmp_path):
     d = doc(current_state="ACCEPTANCE_REVIEW", gates=[{"gate": "input_readiness", "status": "PASS"}])
+    specialist(tmp_path, "ACCEPTANCE_REVIEW")
     res = manifest.transition(write(tmp_path, d), "IMPACT_ANALYSIS")
     msg = " ".join(f.message for f in res.findings)
     assert res.status == "FAIL" and "requirement_clarity" in msg and "acceptance_readiness" in msg

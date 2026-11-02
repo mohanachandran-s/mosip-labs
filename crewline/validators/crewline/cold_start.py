@@ -55,6 +55,16 @@ def _synthetic(res: Result) -> None:
         d["gates"] += [{"gate": "requirement_clarity", "status": "PASS"},
                        {"gate": "acceptance_readiness", "status": "PASS"}]
         path = _write(root, d, "clarity.json")
+        (root / "packets").mkdir(exist_ok=True)
+        (root / "packets/ACCEPTANCE_REVIEW.md").write_text("agent: orchestrator\ncontext_id: main\nverdict: PASS\n",
+                                                           encoding="utf-8")
+        self_review = manifest.transition(path, "IMPACT_ANALYSIS")
+        if self_review.status != "FAIL" or "PKT-004" not in self_review.to_text():
+            res.add("CS-003", BLOCK, "synthetic IMPACT_ANALYSIS must FAIL while the orchestrator signs ACCEPTANCE_REVIEW (PKT-004)",
+                    evidence=self_review.to_text()[-800:])
+            return
+        (root / "packets/ACCEPTANCE_REVIEW.md").write_text(
+            "agent: acceptance-reviewer\ncontext_id: cs-acceptance-1\nverdict: PASS\n", encoding="utf-8")
         second = manifest.apply(path, "IMPACT_ANALYSIS")
         if second.status != "PASS":
             res.add("CS-003", BLOCK, "synthetic IMPACT_ANALYSIS must PASS once clarity gates are recorded",

@@ -103,6 +103,20 @@ def test_write_outside_approved_paths_blocked(tmp_path):
     assert guard.check_write("docs/guide.md", m, cwd=str(tmp_path)).status == "PASS"
 
 
+def test_write_outside_cwd_matches_from_the_git_top(tmp_path):
+    repo = tmp_path / "repo"
+    (repo / "ui-test").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    m = write_manifest(tmp_path, current_state="IMPLEMENTATION",
+                       scope={"module": "svc", "repositories": [], "approved_paths": [".crewline/qa/ui-test-context.md"]})
+    target = repo / ".crewline" / "qa" / "ui-test-context.md"                   # not created yet
+    # the session sits in ui-test/: 0.6.0 matched the bare name and refused an approved path
+    assert guard.check_write(str(target), m, cwd=str(repo / "ui-test")).status == "PASS"
+    res = guard.check_write(str(repo / ".crewline/other.md"), m, cwd=str(repo / "ui-test"))
+    assert res.status == "FAIL" and "GRD-004" in ids(res)
+    assert ".crewline/other.md" in res.to_text()
+
+
 def test_write_without_task_is_allowed():
     assert guard.check_write("src/main/java/X.java", None).status == "PASS"
 

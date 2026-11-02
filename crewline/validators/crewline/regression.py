@@ -9,16 +9,18 @@
 
 `--allow-fail <uid>` covers REG-001/REG-002 for a case with an attributed quality-gate exception
 (e.g. a known application defect). Both runs must be full suites (empty testCasesToExecute) on the
-same environment, run one after the other.
+same environment, run one after the other. Reports: TestRig full-report HTML, JUnit/Surefire XML, Cucumber JSON (UI rig).
 """
 from __future__ import annotations
+
+from pathlib import Path
 
 from .report import case_status, find_full_report
 from .result import BLOCK, INFO, WARN, Result
 
 
 def run(baseline: str, candidate: str, allow_fail: list[str] | None = None) -> Result:
-    res = Result("full-regression", inputs={"baseline": baseline, "candidate": candidate})
+    res = Result("full-regression", inputs={"baseline": str(Path(baseline).resolve()), "candidate": str(Path(candidate).resolve())})
     allow = {a.lower() for a in (allow_fail or [])}
     try:
         base, cand = case_status(baseline), case_status(candidate)

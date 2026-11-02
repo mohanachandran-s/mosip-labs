@@ -22,7 +22,11 @@ if `crewline usage` FAILs the budget, STOP (WAITING_FOR_USER: continue / split /
   `.crewline/qa/` + `packets/<state>.md`. Not the chat and not the implementer's notes. Leaving DESIGN needs
   `packets/DESIGN.md`. A bug-fix IMPLEMENTATION_PLAN needs `evidence/reproduction.json` (failed base run).
   IMPLEMENTATION needs a non-empty `scope.approved_paths`. Feature / dependency-upgrade review needs
-  `evidence/dependency-security.json`. Leaving SYSTEM_TEST_EXECUTION needs `evidence/system-tests.json`.
+  `evidence/dependency-security.json`. Leaving SYSTEM_TEST_EXECUTION needs `evidence/system-tests[-<suite>].json` runs of
+  the module's own system suites (`.crewline/module.yaml`: api-test, ui-test; a UI change needs the UI rig: SYS-002/003).
+  COMMIT_PR needs `crewline regression --out <task>/evidence/full-regression[-<suite>].json` for those suites (REG-007/008).
+  Leaving REQUIREMENT_ANALYSIS, ACCEPTANCE_REVIEW, IMPACT_ANALYSIS, TESTCASE_DESIGN, TESTCASE_REVIEW needs the specialist's
+  `packets/<STATE>.md` with `agent:` and `context_id:` (PKT-004).
 
 1. At **INTAKE only**, read `{{CORE}}/core/principles.md`. Run `python -m crewline pack` and load only that pack's knowledge dirs
    (`packs/<id>/pack.yaml`). MOSIP (default) adds `knowledge/mosip` and `knowledge/frameworks`. Then the target

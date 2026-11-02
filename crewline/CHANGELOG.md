@@ -9,6 +9,36 @@ because Claude Code updates an installed plugin only when that version changes. 
   changed for them.
 - **MAJOR**: a change that can break a task in progress (state machine, manifest schema). Finish or restart open tasks.
 
+## 0.7.0
+System tests and regression must be the module's own suites, and specialist states need their specialist. Found on
+INJIVERIFY-2464: a bug-fix passed system_tests with a hand-made browser check, full_regression with a jest run, and its
+requirement and impact states in seconds without their agents.
+- Leaving SYSTEM_TEST_EXECUTION: every `evidence/system-tests[-<suite>].json` is a full `crewline run` record (SYS-001),
+  one ran inside (`cwd`) a system suite the module declares in `.crewline/module.yaml` (`stack.api_test`,
+  `ui_test_projects`, `system_test_projects`) (SYS-002), and a change to a `stack.node_projects` UI project (`.` = repo
+  root) has a run inside a UI rig (SYS-003). A command that only names a suite does not count. Non-zero exit: WARN SYS-005.
+  Modules that declare none: INFO SYS-004, as before.
+- Code task types, QUALITY_GATE -> COMMIT_PR: a PASS `evidence/full-regression[-<suite>].json` written by the new
+  `crewline regression --out`, which stamps both report hashes, the commit and the worktree digest; refused when
+  hand-written (no stamps), comparing a report with itself, or stale: another HEAD, other uncommitted changes, or a report
+  that changed since (REG-007). One record's candidate report is inside a declared
+  system suite (REG-008).
+- `regression` reads Cucumber JSON (`cucumber.json`), so UI rigs feed full_regression.
+- Code task types leaving REQUIREMENT_ANALYSIS, ACCEPTANCE_REVIEW, IMPACT_ANALYSIS, TESTCASE_DESIGN or TESTCASE_REVIEW:
+  `packets/<STATE>.md` with `agent:` naming a Crewline agent other than the orchestrator, and `context_id:` (PKT-001/004).
+  `cold-start` proves the refusal.
+- `ui-automation` is an active contract on the module's own UI rig and its `.crewline/qa/` context (no longer "Not in the
+  MVP"). `sdet-architect`, `orchestrator`, the skill and the Cursor rule name the new evidence.
+- Guard: a write outside the hook's cwd matches `approved_paths` from the file's git top-level, not its bare name (GRD-004
+  refused an approved `.crewline/...` path while the session was in `ui-test/`).
+- Tasks in progress: a code task past these states continues; at its next transition it needs the new packets/records.
+  Regression records from 0.6.0 have no stamps: rerun `crewline regression --out`.
+  The worktree digest counts untracked files: keep the task folder outside the candidate repo or git-ignored there
+  (`.crewline-work/` in `.git/info/exclude`), or every later write makes the record stale. It covers only the checkout
+  that holds the candidate report; when the rig and the changed code are in different repos, rerun after code changes.
+- Still honour-system: a record with every field, or a packet naming an agent that never ran, can be typed by hand.
+  These rules make a skipped suite or state an explicit act that review can see; they do not prove that a run happened.
+
 ## 0.6.0
 - P3: feature and database-migration `TESTCASE_DESIGN` requires `design_readiness` (tests from the approved design).
   `cold-start` proves the refuse-then-accept. Human walk still `evals/cold-start.md`.

@@ -112,6 +112,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--baseline", required=True, help="TestRig full-report / surefire dir of the base run")
     p.add_argument("--candidate", required=True, help="same, for the branch run")
     p.add_argument("--allow-fail", action="append", default=[], help="test id with an attributed gate exception")
+    p.add_argument("--out", help="also write the result JSON here (evidence/full-regression[-<suite>].json, REG-007)")
     p = sub.add_parser("run")
     p.add_argument("--repo", required=True); p.add_argument("--out", required=True)
     p.add_argument("--report"); p.add_argument("--cwd")
@@ -220,6 +221,14 @@ def main(argv: list[str] | None = None) -> int:
                 res = scope.run(Module(a.module_root, load_profile(module_profile(a.module_root, a.profile))), a.ref)
         elif a.cmd == "regression":
             res = regression.run(a.baseline, a.candidate, a.allow_fail)
+            if a.out:
+                from . import systest
+                res.inputs.update(baseline_sha256=systest.report_sha256(a.baseline),
+                                  candidate_sha256=systest.report_sha256(a.candidate),
+                                  commit=systest.repo_head(a.candidate),     # REG-007 checks these
+                                  worktree_digest=systest.repo_digest(a.candidate))
+                Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+                Path(a.out).write_text(res.to_json(), encoding="utf-8")
         elif a.cmd == "coverage":
             if not pack.uses_coverage_cli():
                 res = Result.not_run("coverage", f"pack {pack.active_id()} has sdet.coverage_cli=false")

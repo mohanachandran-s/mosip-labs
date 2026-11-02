@@ -17,7 +17,11 @@ raw `mvn test` (GRD-007) and Read of dump/oversized files (GRD-008). Developer w
 `test_ids` / evidence paths on the manifest; QA reads those + `.crewline/qa/` + the packet, not the chat.
 Leaving DESIGN needs `packets/DESIGN.md`. Bug-fix IMPLEMENTATION_PLAN needs `evidence/reproduction.json` (failed base run).
 IMPLEMENTATION needs a non-empty `scope.approved_paths`. Feature / dependency-upgrade review needs
-`evidence/dependency-security.json`. Leaving SYSTEM_TEST_EXECUTION needs `evidence/system-tests.json`.
+`evidence/dependency-security.json`. Leaving SYSTEM_TEST_EXECUTION needs `evidence/system-tests[-<suite>].json` runs of
+the module's own system suites (`.crewline/module.yaml`: api-test, ui-test; a UI change needs the UI rig: SYS-002/003).
+COMMIT_PR needs `crewline regression --out <task>/evidence/full-regression[-<suite>].json` for those suites (REG-007/008).
+Leaving REQUIREMENT_ANALYSIS, ACCEPTANCE_REVIEW, IMPACT_ANALYSIS, TESTCASE_DESIGN, TESTCASE_REVIEW needs the specialist's
+`packets/<STATE>.md` with `agent:` and `context_id:` (PKT-004).
 RTK is optional.
 
 ## How to run a task

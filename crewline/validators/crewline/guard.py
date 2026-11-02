@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
 
 from .change_scope import SENSITIVE, _match
@@ -204,12 +205,32 @@ def _rel_repo_path(path: str, cwd: str | None = None) -> str:
     for prefix in ALWAYS_ALLOW_WRITE_PREFIXES + (module_tasks,):
         if lower.startswith(prefix) or lower.startswith(prefix.rstrip("/")):
             return ""  # empty => always allowed (task workspace)
-    # Prefer a path relative to cwd / git top so approved_paths globs match.
+    # Prefer a path relative to cwd so approved_paths globs match; a file outside cwd (the session sits in a
+    # subfolder, e.g. ui-test/, and writes .crewline/...) is relative to its own git top, never its bare name.
     root = Path(cwd).resolve() if cwd else p.parent
     try:
         return p.resolve().relative_to(root).as_posix()
     except ValueError:
-        return p.name
+        pass
+    start = p.parent
+    while not start.is_dir() and start != start.parent:
+        start = start.parent
+    top = _git_top(start)
+    if top:
+        try:
+            return p.resolve().relative_to(top).as_posix()
+        except ValueError:
+            pass
+    return p.name
+
+
+def _git_top(start: Path) -> Path | None:
+    try:
+        r = subprocess.run(["git", "-C", str(start), "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+                           encoding="utf-8", timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return Path(r.stdout.strip()).resolve() if r.returncode == 0 and r.stdout.strip() else None
 
 
 def check_write(path: str, manifest_path: str | None = None, cwd: str | None = None) -> Result:

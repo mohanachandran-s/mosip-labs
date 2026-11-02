@@ -15,7 +15,7 @@ commit/push, so a chat cannot pass for a done SDLC. [Why Crewline on Cursor or C
 
 | | |
 |---|---|
-| Version | `0.6.0` (see `VERSION`) |
+| Version | `0.7.0` (see `VERSION`) |
 | Design | `../AI_Engineering_Agent_Full_SDLC_Implementation_Blueprint_v2.1.html` (authoritative) and `../AI_Engineering_Agent_Full_SDLC_Updated_Plan_v1.3.html` |
 | Lineage | Copied from the SDET Architect Assistant 0.2.0. Its proven workflow is the `test-automation` task type and the `agents/qa/` specialty |
 | Pilots | **PILOT-001** (test automation): [mosip/pre-registration#1088](https://github.com/mosip/pre-registration/pull/1088) · **PILOT-002** (bug fix MOSIP-38854): [mosip/pre-registration#1089](https://github.com/mosip/pre-registration/pull/1089) |

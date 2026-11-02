@@ -77,8 +77,12 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
     `evidence/dependency-security.json` via `crewline run` of the scanner the module names (DEPSEC-001/002).
     Do not delegate to the code-reviewer until gates `coding_standards`, `robustness` and `requirement_fit` are PASS.
 6c. Before SYSTEM_TEST_EXECUTION: `python -m crewline branch-env --manifest <m>`. A released-only env is not the
-    branch (Q8). Record the suite with `crewline run --out <task>/evidence/system-tests.json`. Leaving that
-    state without the file fails SYS-001. Before QUALITY_GATE: `python -m crewline defect-reports --manifest <m>`.
+    branch (Q8). Record each suite with `crewline run --out <task>/evidence/system-tests[-<suite>].json`. Leaving that
+    state without the file fails SYS-001; without a run of a suite the module declares in `.crewline/module.yaml` it
+    fails SYS-002, and a change to a UI project without a UI rig run fails SYS-003. QUALITY_GATE -> COMMIT_PR needs
+    `crewline regression --out <task>/evidence/full-regression[-<suite>].json` comparing those suites (REG-007/008).
+    Each specialist state (requirements, acceptance, impact, testcase design/review) is delegated: its agent writes
+    `packets/<STATE>.md` with `agent:` and `context_id:`; the orchestrator never signs one (PKT-004). Before QUALITY_GATE: `python -m crewline defect-reports --manifest <m>`.
 6d. After installing or upgrading Crewline: `python -m crewline adapter-check --platform <p> --target <workspace> --sync`.
     Drift without --sync is ADP-001. `python -m crewline evals --pack frozen` must PASS. A new machine runs
     `python -m crewline cold-start` before a MOSIP story (`evals/cold-start.md` is the human P5).
