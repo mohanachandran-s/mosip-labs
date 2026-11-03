@@ -19,6 +19,9 @@
            (core/workflow.yaml tracker_guard); a key that does not fit its system; created_by_crewline without a
            create_tracker_item approval; both a key and a waiver; a posted closure comment without tracker_comment approval;
            pr.title not prefixed `<KEY>: ` (and leaving PR_CLOSEOUT without a recorded pr.title)
+  MAN-018  subtasks under the ticket: past GITHUB_PLANNING without one subtask per kind the template lists (unless
+           waived); a subtask key that does not fit the system; created_by_crewline without create_tracker_subtasks;
+           a posted closure comment without tracker_comment; DONE while a subtask closure is neither posted nor declined
   TRN-001  transition is not an edge of the (template-projected) state machine
   TRN-002  entry, edge or exit guard not satisfied
   TRN-003  forced escalation: a repair cap reached, or application/security/specification issue
@@ -234,13 +237,48 @@ def _tracker(doc: dict, res: Result, agents: set[str]) -> None:
         res.add("MAN-017", BLOCK, pr_title_problem(doc, title), remediation=f"gh pr edit <n> --title \"{key}: <summary>\"")
     if (t.get("closure") or {}).get("status") == "posted" and "tracker_comment" not in approved:
         res.add("MAN-017", BLOCK, "closure comment posted without an approval tracker_comment")
-    if waived:
-        missing = [k for k in APPROVAL_FIELDS if not waived.get(k)]
+    for label, rec in (("tracker", waived), ("subtasks", t.get("subtasks_waived"))):
+        if not rec:
+            continue
+        missing = [k for k in APPROVAL_FIELDS if not rec.get(k)]
         if missing:
-            res.add("MAN-005", BLOCK, f"tracker waiver missing {', '.join(missing)}")
-        who = str(waived.get("approver", "")).lower()
-        if waived.get("approver_type") == "agent" or who in agents or who.startswith("agent:"):
-            res.add("MAN-010", BLOCK, f"tracker waived by {waived.get('approver')!r}: only the user can decline a ticket")
+            res.add("MAN-005", BLOCK, f"{label} waiver missing {', '.join(missing)}")
+        who = str(rec.get("approver", "")).lower()
+        if rec.get("approver_type") == "agent" or who in agents or who.startswith("agent:"):
+            res.add("MAN-010", BLOCK, f"{label} waived by {rec.get('approver')!r}: only the user can decline it")
+    for s in t.get("subtasks") or []:
+        sk = s.get("key", "")
+        if system in TRACKER_KEY and not TRACKER_KEY[system].match(sk):
+            res.add("MAN-018", BLOCK, f"subtask {s.get('kind', '?')} key {sk!r} is not a {system} key like the ticket's")
+        if s.get("created_by_crewline") and "create_tracker_subtasks" not in approved:
+            res.add("MAN-018", BLOCK, f"subtask {sk} created by Crewline without an approval create_tracker_subtasks",
+                    remediation="show the drafted subtasks and record the user's approval first")
+        if (s.get("closure") or {}).get("status") == "posted" and "tracker_comment" not in approved:
+            res.add("MAN-018", BLOCK, f"closure comment on subtask {sk} posted without an approval tracker_comment")
+
+
+def subtask_kinds(ctx: Ctx) -> list[str]:
+    return list(ctx.tpl.get("subtasks", ctx.wf.get("subtask_kinds", [])))
+
+
+def _subtask_guard(ctx: Ctx, src: str | None, to_state: str, res: Result) -> None:
+    """Past GITHUB_PLANNING: one subtask per kind; at DONE: every subtask closed with a comment or declined."""
+    t = ctx.doc.get("tracker") or {}
+    if t.get("waived") or to_state not in ctx.wf["states"]:
+        return
+    subs = t.get("subtasks") or []
+    if "GITHUB_PLANNING" in ctx.path and ctx.idx(to_state) > ctx.idx("GITHUB_PLANNING") and not t.get("subtasks_waived"):
+        missing = [k for k in subtask_kinds(ctx) if not any(s.get("kind") == k and s.get("key") for s in subs)]
+        if missing:
+            res.add("MAN-018", BLOCK, f"no subtask under {t.get('key') or 'the ticket'} for: {', '.join(missing)} "
+                                      f"({to_state} from {src})",
+                    remediation="GITHUB_PLANNING: link existing subtasks, or draft them (templates/subtask-template.md) and "
+                                "create them on approval create_tracker_subtasks; or record the user's tracker.subtasks_waived")
+    if src == "FINAL_REPORT" and to_state == "DONE":
+        for s in subs:
+            if (s.get("closure") or {}).get("status") not in ("posted", "declined"):
+                res.add("MAN-018", BLOCK, f"subtask {s.get('key', '?')} ({s.get('kind', '?')}) has no closure comment: "
+                                          "post it on approval tracker_comment, or record that the user declined it")
 
 
 def title_has_key(title: str, key: str) -> bool:
@@ -260,6 +298,19 @@ def pr_title_problem(doc: dict, title: str | None) -> str:
     if not title_has_key(title, t["key"]):
         return f"PR title {title[:60]!r} must start with the tracker key: \"{t['key']}: <summary>\""
     return ""
+
+
+def pr_body_problem(doc: dict, body: str | None) -> str:
+    """'' when the PR body links the ticket (its URL or key, e.g. `Closes #185` / `Refs INJIVER-1386`) or it was waived."""
+    from .branch import key_pattern
+    t = doc.get("tracker") or {}
+    if t.get("waived") or not t.get("key"):
+        return "" if t.get("waived") else "no tracker.key yet (INPUT_VALIDATION)"
+    if body is None:
+        return f"no PR body: pass --body / --body-file that links {t['key']} (templates/pr-template.md)"
+    if (t.get("url") and t["url"] in body) or key_pattern(t["key"]).search(body):
+        return ""
+    return f"PR body does not link the ticket: add `Closes {t.get('url') or t['key']}` (or Refs)"
 
 
 def _tracker_guard(ctx: Ctx, src: str | None, to_state: str, res: Result) -> None:
@@ -396,6 +447,7 @@ def transition(manifest_path: str, to_state: str) -> Result:
             res.add("TRN-003", BLOCK, f"forced escalation in {src}: {guard} - only S_ESCALATE is allowed",
                     remediation="produce templates/escalation-report.md and move to S_ESCALATE")
     _tracker_guard(ctx, src, to_state, res)
+    _subtask_guard(ctx, src, to_state, res)
     if src == "PR_CLOSEOUT" and ctx.idx(to_state) > ctx.idx(src):          # the PR as opened carries the key
         problem = pr_title_problem(doc, (doc.get("pr") or {}).get("title"))
         if problem:

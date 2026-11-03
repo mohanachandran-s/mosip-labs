@@ -31,7 +31,9 @@ def write_manifest(tmp_path, **over):
                   ("quality_gate", "deterministic_validation", "change_scope", "secrets", "token_budget")],
         "approvals": [{"action": "commit_pr", **HUMAN}],
         "evidence_refs": [],
-        "tracker": {"system": "jira", "key": "MOSIP-1", "confirmed_by": "mohan", "closure": {"status": "declined", "reason": "r"}},
+        "tracker": {"system": "jira", "key": "MOSIP-1", "confirmed_by": "mohan", "closure": {"status": "declined", "reason": "r"},
+                    "subtasks": [{"kind": k, "key": f"MOSIP-{i}", "closure": {"status": "declined", "reason": "r"}}
+                                 for i, k in enumerate(("testcase", "automation", "implementation", "testing", "review", "pr"), 2)]},
         "github": {"issue": None, "subtasks": [], "pull_request": None},
         "test_plan": {"environment": "n/a", "environment_kind": "local-stack"},
     }
@@ -46,7 +48,8 @@ def write_manifest(tmp_path, **over):
     ("git commit -sm MOSIP-1", "commit"),
     ("git push origin HEAD", "push"),
     ("gh pr create --title x", "pr"),
-    ("gh pr edit 12 --title 'MOSIP-1: x'", "pr_title"),
+    ("gh pr edit 12 --title 'MOSIP-1: x'", "pr_edit"),
+    ("gh pr edit 12 --body-file b.md", "pr_edit"),
     ("gh pr edit 12 --add-label bug", "other"),
     ("git push --force origin HEAD", "deny_force"),
     ("git push -f", "deny_force"),
@@ -395,12 +398,32 @@ def test_pr_title_must_start_with_tracker_key(tmp_path):
                 'gh pr create --title "Fix MOSIP-1 in notification"', 'gh pr edit 7 --title "fix"'):
         res = guard.check_shell(bad, m)
         assert res.status == "FAIL" and "GRD-009" in ids(res), bad
-    for good in ('gh pr create --title "MOSIP-1: Handle missing name" --body x',
-                 "gh pr create -t 'MOSIP-1 : Negative coverage'", 'gh pr edit 7 --title="MOSIP-1: renamed"'):
+    for good in ('gh pr create --title "MOSIP-1: Handle missing name" --body "Closes MOSIP-1"',
+                 "gh pr create -t 'MOSIP-1 : Negative coverage' -b 'Refs MOSIP-1'", 'gh pr edit 7 --title="MOSIP-1: renamed"'):
         assert "GRD-009" not in ids(guard.check_shell(good, m)), good
     gh = write_manifest(tmp_path, tracker={"system": "github", "key": "inji/pixelpass#185", "confirmed_by": "mohan"}, **ready)
-    assert "GRD-009" not in ids(guard.check_shell('gh pr create --title "#185: Python SDK"', gh))
-    assert "GRD-009" not in ids(guard.check_shell('gh pr create --title "inji/pixelpass#185: Python SDK"', gh))
+    assert "GRD-009" not in ids(guard.check_shell('gh pr create --title "#185: Python SDK" --body "Closes #185"', gh))
+    assert "GRD-009" not in ids(guard.check_shell(
+        'gh pr create --title "inji/pixelpass#185: Python SDK" --body "Closes inji/pixelpass#185"', gh))
     waived = write_manifest(tmp_path, tracker={"waived": {"action": "tracker_waiver", **HUMAN}}, **ready)
     assert "GRD-009" not in ids(guard.check_shell('gh pr create --title "anything"', waived))
     assert guard.check_shell('gh pr edit 7 --title "fix"', None).status == "PASS"     # no active task: not a shipping action
+
+
+def test_pr_body_must_link_the_ticket(tmp_path):
+    ready = dict(current_state="COMMIT_PR",
+                 approvals=[{"action": "commit_pr", **HUMAN}, {"action": "push_and_pr", **HUMAN}],
+                 gates=[{"gate": g, "status": "PASS"} for g in
+                        ("quality_gate", "deterministic_validation", "change_scope", "secrets", "dco", "branch_scope")])
+    url = "https://mosip.atlassian.net/browse/MOSIP-1"
+    m = write_manifest(tmp_path, tracker={"system": "jira", "key": "MOSIP-1", "url": url, "confirmed_by": "mohan"}, **ready)
+    title = '--title "MOSIP-1: x"'
+    for bad in (f"gh pr create {title}", f'gh pr create {title} --body "fixes the NPE"', f"gh pr create {title} -F -",
+                f"gh pr create {title} --body-file {(tmp_path / 'missing.md').as_posix()}", 'gh pr edit 7 --body "no link"'):
+        res = guard.check_shell(bad, m)
+        assert "GRD-009" in ids(res) and "body" in res.to_text(), bad
+    body = tmp_path / "body.md"
+    body.write_text(f"Closes {url}\n\nscope ...", encoding="utf-8")
+    for good in (f'gh pr create {title} --body "Refs MOSIP-1"', f"gh pr create {title} --body-file {body.as_posix()}",
+                 f"gh pr edit 7 -F {body.as_posix()}", "gh pr edit 7 --add-label bug"):
+        assert "GRD-009" not in ids(guard.check_shell(good, m)), good

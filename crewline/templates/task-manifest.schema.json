@@ -508,6 +508,65 @@
               "description": "why the user declined it"
             }
           }
+        },
+        "subtasks": {
+          "type": "array",
+          "description": "GITHUB_PLANNING (SDET plan 7.5): one per kind the template lists (core/workflow.yaml subtask_kinds), under tracker.key in the same system; MAN-018",
+          "items": {
+            "type": "object",
+            "required": [
+              "kind",
+              "key"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "description": "testcase | automation | implementation | testing | review | pr (template `subtasks`)"
+              },
+              "key": {
+                "type": "string",
+                "description": "same format as tracker.key (GitHub sub-issue owner/repo#N or #N; Jira sub-task PROJ-124)"
+              },
+              "url": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "created_by_crewline": {
+                "type": "boolean",
+                "description": "true needs an approval create_tracker_subtasks (MAN-018)"
+              },
+              "closure": {
+                "type": "object",
+                "description": "closure comment on the ticket at PR_CLOSEOUT / FINAL_REPORT (FINAL_REPORT->DONE guard)",
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "pending",
+                      "posted",
+                      "declined"
+                    ]
+                  },
+                  "ref": {
+                    "type": "string",
+                    "description": "comment URL or id when posted"
+                  },
+                  "at": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": "why the user declined it"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "subtasks_waived": {
+          "$ref": "#/$defs/approval",
+          "description": "the user declined subtasks for this task: action subtasks_waiver, approver, reason, scope, timestamp (MAN-018)"
         }
       }
     },

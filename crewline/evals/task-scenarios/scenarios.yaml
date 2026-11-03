@@ -246,4 +246,8 @@ scenarios:
   - id: EV-61
     name: PR title prefixed with the tracker key
     expected: "gh pr create / gh pr edit --title refused (GRD-009) unless the title starts with `<KEY>: ` (Jira key, GitHub #N or owner/repo#N); not when waived; leaving PR_CLOSEOUT needs pr.title with the prefix (MAN-017)"
-    automated_by: test_guard.py::test_pr_title_must_start_with_tracker_key, test_sdlc.py::test_pr_title_recorded_with_key_before_leaving_pr_closeout
+    automated_by: test_guard.py::test_pr_title_must_start_with_tracker_key, test_sdlc.py::test_pr_title_recorded_with_key_before_leaving_pr_closeout, test_guard.py::test_pr_body_must_link_the_ticket
+  - id: EV-62
+    name: Subtasks under the ticket and their closure comments
+    expected: "past GITHUB_PLANNING: one subtask per template kind (default testcase, implementation, testing, review, pr; test-automation: automation) or a human subtasks waiver (MAN-018); creation needs create_tracker_subtasks; DONE needs every subtask closure posted on approval or declined"
+    automated_by: test_sdlc.py::test_subtasks_required_past_github_planning, ::test_subtask_record_rules, ::test_done_needs_each_subtask_closed

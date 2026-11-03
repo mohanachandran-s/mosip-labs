@@ -48,13 +48,20 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
     create it only on a single-use approval `create_tracker_item` (`gh issue create` / `createJiraIssue`); record
     `created_by_crewline: true`, `found_by: created`. (d) The user declines -> `tracker.waived` (action `tracker_waiver`,
     approver, reason, scope, timestamp). Never confirm, create or waive on the user's behalf.
-    Downstream: subtasks at GITHUB_PLANNING go under `tracker.key`; every task commit subject carries the key (Jira
+    GITHUB_PLANNING (templates that walk it): one subtask per kind the template lists (`subtasks`, default
+    `core/workflow.yaml` `subtask_kinds`: testcase, implementation, testing, review, pr) under `tracker.key` in the same
+    system (GitHub sub-issue / Jira sub-task). Link existing ones, or draft them (templates/subtask-template.md), show
+    them and create them on one approval `create_tracker_subtasks`; record `tracker.subtasks[]` (kind, key, url,
+    created_by_crewline). The user may decline: `tracker.subtasks_waived`. No later state without one of these (MAN-018).
+    Downstream: every task commit subject carries the key (Jira
     `PROJ-1`, GitHub `#N`) and `crewline branch --manifest <m>` checks it (BR-002); the PR title **starts** with it, `<KEY>: <summary>`
     (e.g. `MOSIP-38854: Handle missing identity name fields`; GitHub `#185: ...`), the hook refuses `gh pr create` /
     `gh pr edit --title` otherwise (GRD-009), and `pr.title` is recorded before leaving PR_CLOSEOUT (MAN-017); the body
-    links the ticket (`Closes`/`Refs`). At PR_CLOSEOUT / FINAL_REPORT draft a closure comment (PR link, outcome, residual risks),
-    post it only on approval `tracker_comment` and record `tracker.closure` (status posted + ref, or declined + reason):
-    FINAL_REPORT -> DONE needs it.
+    links the ticket (`Closes <url>` / `Refs <key>`; GRD-009 refuses a `gh pr create` / `gh pr edit --body` that does
+    not; use `--body-file` with a readable file). At PR_CLOSEOUT / FINAL_REPORT draft a closure comment (PR link, outcome, residual risks),
+    post it only on approval `tracker_comment` and record `tracker.closure` (status posted + ref, or declined + reason).
+    Each subtask gets its own closure comment (templates/subtask-template.md: work done, evidence, result, PR link) on the
+    same approval, recorded in `tracker.subtasks[].closure`. FINAL_REPORT -> DONE needs all of them (MAN-017/018).
 3. Before every transition run `python -m crewline manifest <manifest> --to <STATE>`; move only with `--apply`. Never move state when it exits non-zero.
 3c. Before IMPACT_ANALYSIS / TESTCASE_DESIGN (feature, bug-fix, test-automation, database-migration): run
     `python -m crewline requirement-clarity --manifest <m>` and record gates `requirement_clarity` and

@@ -29,8 +29,9 @@ On every task:
    `gh issue list --search`, Jira search) and ask the user to confirm it; none -> ask GitHub or Jira (project, type),
    draft it from the brief + ACs, create it only on approval `create_tracker_item`; or record the user's waiver.
    Nothing after INPUT_VALIDATION moves without it (MAN-017). Commit subjects carry `tracker.key`, the PR title
-   starts with it (`<KEY>: <summary>`, GRD-009); the closure
-   comment is posted on approval `tracker_comment` before DONE.
+   starts with it (`<KEY>: <summary>`, GRD-009); the PR body links the
+   ticket. GITHUB_PLANNING: one subtask per template kind, created on approval `create_tracker_subtasks` or waived
+   (MAN-018). Closure comments on the ticket and every subtask, on approval `tracker_comment`, before DONE.
 3. S0_BOOTSTRAP_CHECK: `python -m crewline tools` (from `{{CORE}}/validators`) plus any connector/browser the task type needs.
    Missing -> stop and give the user the numbered steps from the merged tools (`core/tools.yaml` + active pack);
    never work around it.

@@ -4,6 +4,7 @@ summary: Documentation-only change in a module repository (e.g. publishing revie
 path: [S0_BOOTSTRAP_CHECK, INTAKE, INPUT_VALIDATION, IMPACT_ANALYSIS, IMPLEMENTATION_PLAN, GITHUB_PLANNING, REPO_READY,
        IMPLEMENTATION, DETERMINISTIC_VALIDATION, IMPLEMENTATION_REVIEW, QUALITY_GATE, COMMIT_PR, PR_CLOSEOUT,
        KNOWLEDGE_UPDATE, FINAL_REPORT, DONE]
+subtasks: [implementation, review, pr]                   # no tests to design (MAN-018)
 required_gates: [deterministic_validation, secrets, change_scope, token_budget]
 # Gates a core guard names although this type has nothing for them to measure. Owned by a state on the path, so the
 # "skipped state" rule does not cover them; listed here with the reason instead. Never a required gate, never secrets.

@@ -48,7 +48,9 @@ def doc(**over):
         "testcases": {"canonical_format": "none"},
         "repair": {"attempt_count": 0, "dev_attempt_count": 0, "attempt_history": [], "classification": ""},
         "reviews": {"implementation_review": "PASS", "fresh_context_review": "PASS"},
-        "tracker": {"system": "jira", "key": "MOSIP-1", "confirmed_by": "mohan", "closure": {"status": "declined", "reason": "r"}},
+        "tracker": {"system": "jira", "key": "MOSIP-1", "confirmed_by": "mohan", "closure": {"status": "declined", "reason": "r"},
+                    "subtasks": [{"kind": k, "key": f"MOSIP-{i}", "closure": {"status": "declined", "reason": "r"}}
+                                 for i, k in enumerate(("testcase", "automation", "implementation", "testing", "review", "pr"), 2)]},
         "gates": [], "approvals": [], "evidence_refs": [], "github": {"issue": None, "subtasks": [], "pull_request": None},
         "test_plan": {"environment": "local docker-compose", "environment_kind": "local-stack"},
     }
@@ -1466,7 +1468,8 @@ def test_tracker_record_rules(tmp_path):
 
 def test_done_needs_tracker_closure_comment(tmp_path):
     d = doc(current_state="FINAL_REPORT", final_report_ref="final-report.md", workspace={"checkout_mode": "single"},
-            tracker={"system": "jira", "key": "INJIVER-9", "confirmed_by": "mohan", "closure": {"status": "pending"}})
+            tracker={"system": "jira", "key": "INJIVER-9", "confirmed_by": "mohan", "closure": {"status": "pending"},
+                     "subtasks_waived": {"action": "subtasks_waiver", **HUMAN}})
     assert "tracker.closure.status" in manifest.transition(write(tmp_path, d), "DONE").to_text()
     d["tracker"]["closure"] = {"status": "posted", "ref": "https://x/browse/INJIVER-9?focusedCommentId=1"}
     d["approvals"] = [{"action": "tracker_comment", **HUMAN}]
@@ -1498,3 +1501,56 @@ def test_pr_title_recorded_with_key_before_leaving_pr_closeout(tmp_path):
     assert "MAN-017" in ids(manifest.check(write(tmp_path, d)))
     d["pr"]["title"] = "MOSIP-1: Handle missing identity name fields"
     assert "MAN-017" not in ids(manifest.transition(write(tmp_path, d), "RELEASE_READINESS"))
+
+
+# --- subtasks under the ticket (MAN-018) ----------------------------------------------------------------------------
+def _sub(kind, n, **extra):
+    return {"kind": kind, "key": f"INJIVER-{n}", **extra}
+
+
+def test_subtasks_required_past_github_planning(tmp_path):
+    base = {"system": "jira", "key": "INJIVER-1", "confirmed_by": "mohan"}
+    d = doc(current_state="GITHUB_PLANNING", tracker=dict(base), gates=READY,
+            approvals=[{"action": "base_branch", **HUMAN}])
+    res = manifest.transition(write(tmp_path, d), "REPO_READY")
+    assert "MAN-018" in ids(res) and "testcase, implementation, testing, review, pr" in res.to_text()
+    d["tracker"]["subtasks"] = [_sub(k, i) for i, k in enumerate(("testcase", "implementation", "testing", "review"), 2)]
+    msgs = " ".join(f.message for f in manifest.transition(write(tmp_path, d), "REPO_READY").findings if f.rule_id == "MAN-018")
+    assert msgs.startswith("no subtask") and ": pr " in msgs
+    d["tracker"]["subtasks"].append(_sub("pr", 9))
+    assert manifest.transition(write(tmp_path, d), "REPO_READY").status == "PASS"
+    w = doc(current_state="GITHUB_PLANNING", gates=READY, approvals=[{"action": "base_branch", **HUMAN}],
+            tracker={**base, "subtasks_waived": {"action": "subtasks_waiver", **HUMAN}})
+    assert manifest.transition(write(tmp_path, w, "w.json"), "REPO_READY").status == "PASS"
+    ta = doc(task_type="test-automation", current_state="GITHUB_PLANNING", gates=READY,
+             approvals=[{"action": "base_branch", **HUMAN}], tracker={**base, "subtasks": d["tracker"]["subtasks"]})
+    assert "automation" in manifest.transition(write(tmp_path, ta, "ta.json"), "REPO_READY").to_text()   # template kinds
+    inc = doc(task_type="incident", risk_tier="L0", current_state="IMPACT_ANALYSIS", tracker=dict(base))
+    assert "MAN-018" not in ids(manifest.transition(write(tmp_path, inc, "inc.json"), "KNOWLEDGE_UPDATE"))  # no GITHUB_PLANNING
+
+
+def test_subtask_record_rules(tmp_path):
+    def found(subs, approvals=(), **extra):
+        t = {"system": "jira", "key": "INJIVER-1", "confirmed_by": "mohan", "subtasks": subs, **extra}
+        return ids(manifest.check(write(tmp_path, doc(tracker=t, approvals=list(approvals)), "s.json")))
+    assert "MAN-018" in found([{"kind": "pr", "key": "#4"}])                                  # GitHub key under a Jira ticket
+    assert "MAN-018" in found([_sub("pr", 4, created_by_crewline=True)])                      # no create approval
+    assert "MAN-018" not in found([_sub("pr", 4, created_by_crewline=True)], [{"action": "create_tracker_subtasks", **HUMAN}])
+    assert "MAN-018" in found([_sub("pr", 4, closure={"status": "posted", "ref": "c"})])      # comment needs approval
+    assert "MAN-010" in found([], subtasks_waived={"action": "subtasks_waiver", **HUMAN, "approver": "orchestrator"})
+    assert "MAN-005" in found([], subtasks_waived={"action": "subtasks_waiver", "approver": "mohan"})
+
+
+def test_done_needs_each_subtask_closed(tmp_path):
+    subs = [_sub(k, n, closure={"status": "posted", "ref": f"c{n}"}) for n, k in enumerate(("testcase", "implementation",
+                                                                                         "testing", "review"), 5)]
+    subs[2]["key"] = "INJIVER-3"
+    subs.append(_sub("pr", 4, closure={"status": "pending"}))
+    d = doc(current_state="FINAL_REPORT", final_report_ref="final-report.md", workspace={"checkout_mode": "single"},
+            approvals=[{"action": "tracker_comment", **HUMAN}],
+            tracker={"system": "jira", "key": "INJIVER-1", "confirmed_by": "mohan", "subtasks": subs,
+                     "closure": {"status": "posted", "ref": "c0"}})
+    res = manifest.transition(write(tmp_path, d), "DONE")
+    assert "MAN-018" in ids(res) and "INJIVER-4" in res.to_text() and "INJIVER-3" not in res.to_text()
+    subs[-1]["closure"] = {"status": "declined", "reason": "PR link is on the parent"}
+    assert manifest.transition(write(tmp_path, d), "DONE").status == "PASS"

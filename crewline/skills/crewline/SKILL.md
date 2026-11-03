@@ -37,8 +37,9 @@ RTK is optional.
    **Tracker ticket before design or code** (INPUT_VALIDATION, every task; MAN-017): link the user-confirmed GitHub
    issue / Jira item, or draft one and create it in the system the user picks only on approval `create_tracker_item`,
    or record their waiver. Commit subjects carry `tracker.key`; the PR title starts with it
-   (`<KEY>: <summary>`, GRD-009); closure comment on approval `tracker_comment`
-   (orchestrator step 2b).
+   (`<KEY>: <summary>`, GRD-009); the PR body links the ticket (GRD-009). GITHUB_PLANNING:
+   one subtask per template kind under the ticket, created on approval `create_tracker_subtasks` or waived (MAN-018).
+   Closure comments on the ticket and each subtask on approval `tracker_comment` before DONE (orchestrator step 2b).
 3. S0_BOOTSTRAP_CHECK: `crewline tools` (from `${CLAUDE_PLUGIN_ROOT}/validators`) plus any connector/browser the task type needs.
    Missing -> stop and give the user the numbered steps from the merged tools (`core/tools.yaml` + active pack);
    never work around it.

@@ -13,5 +13,6 @@ entry_guards:
   IMPLEMENTATION_REVIEW:
     - {gate: coding_standards, eq: PASS}
     - {gate: requirement_fit, eq: PASS}
+subtasks: [testcase, automation, testing, review, pr]    # SDET plan 7.5 (MAN-018)
 required_gates: [requirement_clarity, acceptance_readiness, testcase_readiness, deterministic_validation, coding_standards, requirement_fit, test_integrity, traceability, system_tests, branch_environment, defect_reports, full_regression, secrets, change_scope, token_budget]
 notes: change_scope approved_paths default to the module api-test/ (and coverage/ where the matrix exists); production code is out of scope.

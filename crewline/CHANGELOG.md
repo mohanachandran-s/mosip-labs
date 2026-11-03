@@ -9,6 +9,21 @@ because Claude Code updates an installed plugin only when that version changes. 
   changed for them.
 - **MAJOR**: a change that can break a task in progress (state machine, manifest schema). Finish or restart open tasks.
 
+## 0.7.2
+Closes the GitHub work-tracking gaps against the SDET plan (section 7.5, 7.9): subtasks, their closure comments, and a PR
+body that links the ticket.
+- GITHUB_PLANNING: on templates that walk it, every later state needs one `tracker.subtasks[]` entry per kind the template
+  lists (`subtasks`; default `core/workflow.yaml` `subtask_kinds`: testcase, implementation, testing, review, pr;
+  test-automation: automation instead of implementation; documentation: implementation, review, pr), keyed in the same
+  system as the ticket (GitHub sub-issue / Jira sub-task), or a human `tracker.subtasks_waived` (MAN-018). Like the ticket
+  rule, tasks already past GITHUB_PLANNING are stopped at their next move until they link, create or waive subtasks.
+- Creating subtasks needs the new single-use approval `create_tracker_subtasks` (replaces `create_github_issue_subtasks`,
+  which had no enforcement). `templates/subtask-template.md` titles them `<KEY>: <kind> - <title>`.
+- FINAL_REPORT -> DONE: every subtask's closure comment is posted on approval `tracker_comment` or declined (MAN-018).
+- GRD-009 also checks the PR body: `gh pr create` needs `--body` / a readable `--body-file` that links the ticket (URL or
+  key); `gh pr edit --body|--body-file` is checked too. `--fill` and `--body-file -` cannot be checked and are refused.
+- Eval EV-62.
+
 ## 0.7.1
 Every task has a tracker ticket before any design or code. Found on inji/pixelpass PP-PYSDK and PP-PYSDK-HARDEN:
 GITHUB_PLANNING was a pass-through (8 seconds, `github.issue: null`) and Crewline never looked for or created a Jira item.

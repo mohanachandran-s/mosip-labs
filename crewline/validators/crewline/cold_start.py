@@ -52,7 +52,9 @@ def _synthetic(res: Result) -> None:
             res.add("CS-003", BLOCK, "synthetic IMPACT_ANALYSIS must FAIL until requirement_clarity PASS and a tracker "
                                      "ticket is confirmed (MAN-017)", evidence=first.to_text()[-800:])
             return
-        d["tracker"] = {"system": "jira", "key": "MOSIP-0", "found_by": "request", "confirmed_by": "cold-start user"}
+        d["tracker"] = {"system": "jira", "key": "MOSIP-0", "found_by": "request", "confirmed_by": "cold-start user",
+                        "subtasks": [{"kind": k, "key": f"MOSIP-{i}"} for i, k in
+                                     enumerate(manifest.load_workflow()["subtask_kinds"], 1)]}
         d["gates"] += [{"gate": "requirement_clarity", "status": "PASS"},
                        {"gate": "acceptance_readiness", "status": "PASS"}]
         path = _write(root, d, "clarity.json")

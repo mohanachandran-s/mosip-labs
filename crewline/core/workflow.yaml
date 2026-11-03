@@ -133,6 +133,12 @@ tracker_guard:
     - {path: tracker.waived.approver, ne: ""}
 tracker_guard_after: INPUT_VALIDATION
 
+# Subtasks under the ticket (SDET plan 7.5). On a template whose path has GITHUB_PLANNING, every move into a later state
+# needs one `tracker.subtasks[]` entry per kind below (a template's `subtasks` overrides the list), each linked or created
+# on approval `create_tracker_subtasks`, unless the ticket or the subtasks were waived by a human (MAN-018).
+# FINAL_REPORT -> DONE needs every subtask's closure comment posted on approval `tracker_comment` or declined (MAN-018).
+subtask_kinds: [testcase, implementation, testing, review, pr]
+
 # Leaving PR_CLOSEOUT forward (whatever the template's next state is) needs every valid comment dealt with.
 exit_guards:
   PR_CLOSEOUT:

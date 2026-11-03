@@ -8,7 +8,8 @@
   GRD-006  --no-verify (skipping git hooks)
   GRD-007  raw dump of a log/report, or a test suite not run through `crewline run`
   GRD-008  Read of a dump file or a file over read_max_bytes
-  GRD-009  `gh pr create` / `gh pr edit --title` whose title does not start with the task's tracker key (`<KEY>: summary`)
+  GRD-009  `gh pr create` / `gh pr edit --title|--body` whose title does not start with the task's tracker key
+           (`<KEY>: summary`) or whose body does not link the ticket (URL or key)
 
 The Cursor / Claude adapter runs this from a platform hook so the model cannot skip
 `crewline manifest` and still commit. Exit 0 PASS, 1 FAIL, 2 NOT_RUN.
@@ -23,7 +24,7 @@ import subprocess
 from pathlib import Path
 
 from .change_scope import SENSITIVE, _match
-from .manifest import CORE, check, pr_title_problem, transition
+from .manifest import CORE, check, pr_body_problem, pr_title_problem, transition
 from .result import BLOCK, Result
 from .workspace import tasks_root
 
@@ -119,23 +120,45 @@ def classify_shell(command: str) -> str:
         return "push"
     if re.search(r"\bgh(\.exe)?\s+pr\s+create\b", low):
         return "pr"
-    if re.search(r"\bgh(\.exe)?\s+pr\s+edit\b", low) and pr_title(text) is not None:
-        return "pr_title"
+    if re.search(r"\bgh(\.exe)?\s+pr\s+edit\b", low) and (pr_title(text) is not None or _has_body(text)):
+        return "pr_edit"
     return "other"
 
 
-def pr_title(command: str) -> str | None:
-    """The --title / -t value of a gh pr command, or None when it has none."""
+def _flag(command: str, long: str, short: str) -> str | None:
+    """The value of `--long v`, `--long=v` or `-s v` in a gh command, or None when absent."""
     try:
         toks = shlex.split(command, posix=True)
     except ValueError:
         toks = command.split()
     for i, tok in enumerate(toks):
-        if tok in ("--title", "-t") and i + 1 < len(toks):
+        if tok in (long, short) and i + 1 < len(toks):
             return toks[i + 1]
-        if tok.startswith("--title="):
+        if tok.startswith(long + "="):
             return tok.split("=", 1)[1]
     return None
+
+
+def pr_title(command: str) -> str | None:
+    return _flag(command, "--title", "-t")
+
+
+def _has_body(command: str) -> bool:
+    return _flag(command, "--body", "-b") is not None or _flag(command, "--body-file", "-F") is not None
+
+
+def pr_body(command: str) -> str | None:
+    """--body text, or the contents of --body-file (a file the hook can read; `-` / stdin cannot be checked)."""
+    body = _flag(command, "--body", "-b")
+    if body is not None:
+        return body
+    path = _flag(command, "--body-file", "-F")
+    if path is None or path == "-":
+        return None
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return None
 
 
 def has_signoff(command: str) -> bool:
@@ -178,19 +201,22 @@ def check_shell(command: str, manifest_path: str | None = None) -> Result:
     if action == "commit" and not has_signoff(command):
         res.add("GRD-005", BLOCK, "git commit must be signed off (`git commit -s`)", evidence=command)
         return res.finish()
-    if action == "pr_title" and not manifest_path:
+    if action == "pr_edit" and not manifest_path:
         return res.finish()                  # renaming a PR outside a task is not a shipping action
     doc = _need_task(res, manifest_path, action)
     if doc is None:
         return res.finish()
     state = doc.get("current_state")
-    if action in ("pr", "pr_title"):
-        problem = pr_title_problem(doc, pr_title(command))
-        if problem:
+    if action in ("pr", "pr_edit"):                  # an edit is checked only for the parts it changes
+        title = pr_title(command)
+        problems = [p for p in (
+            pr_title_problem(doc, title) if action == "pr" or title is not None else "",
+            pr_body_problem(doc, pr_body(command)) if action == "pr" or _has_body(command) else "") if p]
+        for problem in problems:
             res.add("GRD-009", BLOCK, problem, evidence=command,
-                    remediation="title format of mosip/pre-registration#1089: `<KEY>: <summary>`")
-            return res.finish()
-        if action == "pr_title":
+                    remediation="title `<KEY>: <summary>` (mosip/pre-registration#1089); body `Closes <ticket URL>` "
+                                "(templates/pr-template.md) via --body or a readable --body-file")
+        if problems or action == "pr_edit":
             return res.finish()
     if action == "commit":
         if state not in COMMIT_STATES:
