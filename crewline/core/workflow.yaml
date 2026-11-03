@@ -15,7 +15,7 @@ version: 2
 states:
   S0_BOOTSTRAP_CHECK:        {next: [INTAKE]}                       # tools.yaml capabilities for this task type
   INTAKE:                    {next: [INPUT_VALIDATION]}             # classify task_type + risk_tier, create manifest
-  INPUT_VALIDATION:          {next: [REQUIREMENT_ANALYSIS]}
+  INPUT_VALIDATION:          {next: [REQUIREMENT_ANALYSIS]}         # tracker ticket linked, created on approval, or waived
   REQUIREMENT_ANALYSIS:      {next: [ACCEPTANCE_REVIEW]}
   ACCEPTANCE_REVIEW:         {next: [REQUIREMENT_ANALYSIS, IMPACT_ANALYSIS]}
   IMPACT_ANALYSIS:           {next: [DESIGN]}
@@ -23,7 +23,7 @@ states:
   TESTCASE_DESIGN:           {next: [TESTCASE_REVIEW]}              # SDET: from ACs + design, never from the code (independent oracle)
   TESTCASE_REVIEW:           {next: [TESTCASE_DESIGN, IMPLEMENTATION_PLAN]}
   IMPLEMENTATION_PLAN:       {next: [GITHUB_PLANNING]}
-  GITHUB_PLANNING:           {next: [REPO_READY]}
+  GITHUB_PLANNING:           {next: [REPO_READY]}                   # subtasks under the tracker ticket (draft; approval per action)
   REPO_READY:                {next: [IMPLEMENTATION]}               # fork model: base branch asked first
   IMPLEMENTATION:            {next: [DETERMINISTIC_VALIDATION]}     # code + unit tests (developer) and/or testcases (SDET)
   DETERMINISTIC_VALIDATION:  {next: [IMPLEMENTATION, UNIT_INTEGRATION_TEST]}
@@ -115,9 +115,23 @@ transition_guards:
     - {path: repair.classification, in: [ENVIRONMENT, TEST_DATA]}
   FINAL_REPORT->DONE:
     - {path: final_report_ref, ne: ""}
+    - any_of:                                     # closure comment on the tracker ticket: posted on approval, or declined
+        - {path: tracker.closure.status, in: [posted, declined]}
+        - {path: tracker.waived.approver, ne: ""}
     - any_of:                                     # no task worktree left behind (principle 9)
         - {path: workspace.open_worktrees, eq: 0}
         - {path: workspace.checkout_mode, eq: single}
+
+# Tracker ticket before any design or code (INPUT_VALIDATION). `crewline manifest` applies this guard to EVERY move into a
+# state after INPUT_VALIDATION, on every template's path, so a task already past it is caught at its next move and a
+# WAITING_FOR_USER resume cannot skip it (MAN-017). Holds when a GitHub issue or Jira item is linked and a human confirmed
+# it (found in the request, branch, commits or a search; or created by Crewline on approval `create_tracker_item`), or a
+# human waived it with a reason. MAN-017 also checks the tracker block itself (key format, creation approval, waiver).
+tracker_guard:
+  any_of:
+    - all_of: [{path: tracker.key, ne: ""}, {path: tracker.confirmed_by, ne: ""}]
+    - {path: tracker.waived.approver, ne: ""}
+tracker_guard_after: INPUT_VALIDATION
 
 # Leaving PR_CLOSEOUT forward (whatever the template's next state is) needs every valid comment dealt with.
 exit_guards:

@@ -214,6 +214,7 @@ def base_manifest(**over):
         "repair": {"attempt_count": 0, "attempt_history": [], "classification": "AUTOMATION"},
         "reviews": {"implementation_review": "PASS", "fresh_context_review": "PASS"},
         "gates": [{"gate": g, "status": "PASS"} for g in ("testcase_readiness", "plan_readiness", "repo_ready")],
+        "tracker": {"system": "jira", "key": "MOSIP-1", "confirmed_by": "mohan", "closure": {"status": "declined", "reason": "r"}},
         "approvals": [], "evidence_refs": [], "github": {"issue": None, "subtasks": [], "pull_request": None},
         "test_plan": {"environment": "released", "environment_kind": "branch-deployed-env"},
     }

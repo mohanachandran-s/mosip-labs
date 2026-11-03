@@ -30,7 +30,7 @@ gates:
   input_readiness:
     state: INPUT_VALIDATION
     enforced_by: agent+human
-    requires: [story or issue key, design document or approved exception, OpenAPI where an API contract exists]
+    requires: [tracker ticket confirmed / created on approval / waived (tracker_guard, MAN-017), design document or approved exception, OpenAPI where an API contract exists]
     on_fail: WAITING_FOR_USER
 
   acceptance_readiness:

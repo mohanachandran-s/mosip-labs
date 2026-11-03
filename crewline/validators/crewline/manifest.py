@@ -15,6 +15,10 @@
   MAN-015  a gate in the template's `no_silent_na` is NOT_APPLICABLE without an attributed exception
   MAN-016  WARN: the task started on another Crewline version than the one running now (read CHANGELOG.md between
            the two before the next transition; the task keeps its records)
+  MAN-017  tracker ticket: a move past INPUT_VALIDATION without a confirmed GitHub issue / Jira key or a human waiver
+           (core/workflow.yaml tracker_guard); a key that does not fit its system; created_by_crewline without a
+           create_tracker_item approval; both a key and a waiver; a posted closure comment without tracker_comment approval;
+           pr.title not prefixed `<KEY>: ` (and leaving PR_CLOSEOUT without a recorded pr.title)
   TRN-001  transition is not an edge of the (template-projected) state machine
   TRN-002  entry, edge or exit guard not satisfied
   TRN-003  forced escalation: a repair cap reached, or application/security/specification issue
@@ -39,6 +43,10 @@ APPROVAL_FIELDS = ("approver", "reason", "scope", "timestamp")
 TIERS = ["L0", "L1", "L2", "L3"]
 DEFAULT_TYPE = "test-automation"     # manifests from the SDET assistant era carry no task_type
 NEVER_WAIVABLE = {"secrets", "requirement_clarity", "requirement_fit"}
+TRACKER_KEY = {
+    "github": re.compile(r"^([\w.-]+/[\w.-]+)?#\d+$"),       # owner/repo#12, or #12 on the primary upstream repo
+    "jira": re.compile(r"^[A-Z][A-Z0-9]+-\d+$"),             # INJIVER-1386
+}
 
 
 def _get(doc: dict, path: str):
@@ -197,8 +205,74 @@ def check(manifest_path: str) -> Result:
                                       "approvals come from a human, never from an agent")
     _independence(doc, res)
     _check_linked(doc, res)
+    _tracker(doc, res, agents)
     _version_drift(doc, res)
     return res.finish()
+
+
+def _tracker(doc: dict, res: Result, agents: set[str]) -> None:
+    """The tracker block itself; whether one is needed yet is the tracker_guard in transition()."""
+    t = doc.get("tracker") or {}
+    key, system, waived = t.get("key"), t.get("system"), t.get("waived")
+    if key and waived:
+        res.add("MAN-017", BLOCK, f"tracker has both key {key} and a waiver: keep the one that is true")
+    if key:
+        if system not in TRACKER_KEY:
+            res.add("MAN-017", BLOCK, f"tracker.key {key} without tracker.system github|jira")
+        elif not TRACKER_KEY[system].match(key):
+            res.add("MAN-017", BLOCK, f"tracker.key {key!r} is not a {system} key "
+                                      f"({'owner/repo#N or #N' if system == 'github' else 'PROJ-123'})")
+        who = str(t.get("confirmed_by", "")).lower()
+        if who and (who in agents or who.startswith("agent:")):
+            res.add("MAN-010", BLOCK, f"tracker {key} confirmed by {t['confirmed_by']!r}: the user confirms the link")
+    approved = {a.get("action") for a in doc.get("approvals", []) if all(a.get(k) for k in APPROVAL_FIELDS)}
+    if t.get("created_by_crewline") and "create_tracker_item" not in approved:
+        res.add("MAN-017", BLOCK, f"tracker {key or '?'} created by Crewline without an approval create_tracker_item",
+                remediation="show the draft (system, project, type, title, body) and record the user's approval first")
+    title = (doc.get("pr") or {}).get("title")
+    if title and key and not title_has_key(title, key):
+        res.add("MAN-017", BLOCK, pr_title_problem(doc, title), remediation=f"gh pr edit <n> --title \"{key}: <summary>\"")
+    if (t.get("closure") or {}).get("status") == "posted" and "tracker_comment" not in approved:
+        res.add("MAN-017", BLOCK, "closure comment posted without an approval tracker_comment")
+    if waived:
+        missing = [k for k in APPROVAL_FIELDS if not waived.get(k)]
+        if missing:
+            res.add("MAN-005", BLOCK, f"tracker waiver missing {', '.join(missing)}")
+        who = str(waived.get("approver", "")).lower()
+        if waived.get("approver_type") == "agent" or who in agents or who.startswith("agent:"):
+            res.add("MAN-010", BLOCK, f"tracker waived by {waived.get('approver')!r}: only the user can decline a ticket")
+
+
+def title_has_key(title: str, key: str) -> bool:
+    """PR title prefix `<KEY>: summary` (mosip/pre-registration#1089). A GitHub key may be written as `#N`."""
+    m = re.fullmatch(r"(?:[\w.-]+/[\w.-]+)?#(\d+)", key.strip())
+    forms = [re.escape(key.strip())] + ([rf"#{m.group(1)}"] if m else [])
+    return bool(re.match(rf"\s*(?:{'|'.join(forms)})\s*:", title or ""))
+
+
+def pr_title_problem(doc: dict, title: str | None) -> str:
+    """'' when the title is fine (or the ticket was waived); otherwise what is wrong."""
+    t = doc.get("tracker") or {}
+    if t.get("waived") or not t.get("key"):
+        return "" if t.get("waived") else "no tracker.key yet (INPUT_VALIDATION)"
+    if not title:
+        return f"no PR title: pass --title \"{t['key']}: <summary>\""
+    if not title_has_key(title, t["key"]):
+        return f"PR title {title[:60]!r} must start with the tracker key: \"{t['key']}: <summary>\""
+    return ""
+
+
+def _tracker_guard(ctx: Ctx, src: str | None, to_state: str, res: Result) -> None:
+    """No design or code without a ticket: every move into a state after `tracker_guard_after` (any template)."""
+    guard, after = ctx.wf.get("tracker_guard"), ctx.wf.get("tracker_guard_after", "INPUT_VALIDATION")
+    if not guard or to_state not in ctx.wf["states"] or ctx.idx(to_state) <= ctx.idx(after):
+        return
+    ok, why = ctx.holds(guard)
+    if not ok:
+        res.add("MAN-017", BLOCK, f"no tracker ticket for {to_state} (from {src}): {why}",
+                remediation="INPUT_VALIDATION: find the GitHub issue / Jira item (request, branch, commits, search) and "
+                            "have the user confirm it; else ask GitHub or Jira, draft it, create it on approval "
+                            "create_tracker_item; or record the user's waiver with a reason (tracker.waived)")
 
 
 def _version_drift(doc: dict, res: Result) -> None:
@@ -321,6 +395,11 @@ def transition(manifest_path: str, to_state: str) -> Result:
         if ok:
             res.add("TRN-003", BLOCK, f"forced escalation in {src}: {guard} - only S_ESCALATE is allowed",
                     remediation="produce templates/escalation-report.md and move to S_ESCALATE")
+    _tracker_guard(ctx, src, to_state, res)
+    if src == "PR_CLOSEOUT" and ctx.idx(to_state) > ctx.idx(src):          # the PR as opened carries the key
+        problem = pr_title_problem(doc, (doc.get("pr") or {}).get("title"))
+        if problem:
+            res.add("MAN-017", BLOCK, f"leaving PR_CLOSEOUT: {problem} (record pr.title as on GitHub)")
     extra = per_repo_gate_guards(doc) if to_state == "PR_CLOSEOUT" and src == "COMMIT_PR" else []
     for guard in guards + extra:
         ok, why = ctx.holds(guard)

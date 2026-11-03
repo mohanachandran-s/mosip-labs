@@ -7,13 +7,17 @@ the task's own commits (fork -> PR to upstream model).
   BR-004  upstream branch moved past the base commit                         WARN
   BR-005  PR target is not the upstream repo/branch                          BLOCK
 
-A task commit is one whose subject carries the task's story key (e.g. `MOSIP-17633`). Anything else
-must be listed with --allow <sha>, which the orchestrator only passes after the user explicitly
-asked for that change to be included.
+A task commit is one whose subject carries one of the task's keys: the tracker key (Jira `INJIVER-1386`, or a GitHub
+issue `#185` / `owner/repo#185`) or a story key (`MOSIP-17633`). `--manifest` reads tracker.key and
+requirements.story_keys. Anything else must be listed with --allow <sha>, which the orchestrator only passes after the
+user explicitly asked for that change to be included.
 """
 from __future__ import annotations
 
+import json
+import re
 import subprocess
+from pathlib import Path
 
 from .result import BLOCK, INFO, WARN, Result
 
@@ -24,15 +28,33 @@ def branch_of(upstream_ref: str) -> str:
     return ref.split("/", 1)[1] if "/" in ref else ref
 
 
+def key_pattern(key: str) -> re.Pattern:
+    """`MOSIP-1` must not match `MOSIP-17633`; a GitHub key matches its `#N` (any repo prefix) or the full form."""
+    m = re.fullmatch(r"(?:[\w.-]+/[\w.-]+)?#(\d+)", key.strip())
+    if m:
+        return re.compile(rf"(?<![\w#])(?:[\w.-]+/[\w.-]+)?#{m.group(1)}(?!\d)")
+    return re.compile(rf"(?<![\w-]){re.escape(key.strip())}(?!\d)")
+
+
+def manifest_keys(manifest_path: str) -> list[str]:
+    doc = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    keys = [(doc.get("tracker") or {}).get("key")] + list((doc.get("requirements") or {}).get("story_keys") or [])
+    return [k for k in keys if k]
+
+
 def _git(repo: str, *args: str) -> str:
     return subprocess.run(["git", "-C", repo, *args], check=True, capture_output=True,
                           text=True, encoding="utf-8").stdout.strip()
 
 
-def run(repo: str, upstream_ref: str, base: str, story_key: str, allow: list[str] | None = None,
+def run(repo: str, upstream_ref: str, base: str, story_key: str | list[str], allow: list[str] | None = None,
         pr_repo: str | None = None, pr_base: str | None = None, upstream_repo: str | None = None) -> Result:
+    keys = [story_key] if isinstance(story_key, str) else [k for k in story_key if k]
     res = Result("branch-scope", inputs={"repo": repo, "upstream_ref": upstream_ref, "base": base,
-                                         "story_key": story_key})
+                                         "story_key": ", ".join(keys)})
+    if not keys:
+        return Result.not_run("branch-scope", "no task key: pass --story or --manifest with tracker.key")
+    patterns = [key_pattern(k) for k in keys]
     allow = [a.lower() for a in (allow or [])]
     try:
         base_full = _git(repo, "rev-parse", base)
@@ -49,7 +71,7 @@ def run(repo: str, upstream_ref: str, base: str, story_key: str, allow: list[str
     for sha, parents, subject in commits:
         if len(parents.split()) > 1:
             res.add("BR-003", BLOCK, f"merge commit {sha[:10]}: {subject[:70]}", evidence=sha)
-        elif story_key not in subject and not any(sha.startswith(a) for a in allow):
+        elif not any(p.search(subject) for p in patterns) and not any(sha.startswith(a) for a in allow):
             res.add("BR-002", BLOCK, f"foreign commit {sha[:10]}: {subject[:70]}", evidence=sha,
                     remediation="drop it, or include it only after the user explicitly asks (--allow)")
     if upstream_tip != base_full:

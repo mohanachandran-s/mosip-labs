@@ -8,6 +8,7 @@
   GRD-006  --no-verify (skipping git hooks)
   GRD-007  raw dump of a log/report, or a test suite not run through `crewline run`
   GRD-008  Read of a dump file or a file over read_max_bytes
+  GRD-009  `gh pr create` / `gh pr edit --title` whose title does not start with the task's tracker key (`<KEY>: summary`)
 
 The Cursor / Claude adapter runs this from a platform hook so the model cannot skip
 `crewline manifest` and still commit. Exit 0 PASS, 1 FAIL, 2 NOT_RUN.
@@ -17,11 +18,12 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
 from .change_scope import SENSITIVE, _match
-from .manifest import CORE, check, transition
+from .manifest import CORE, check, pr_title_problem, transition
 from .result import BLOCK, Result
 from .workspace import tasks_root
 
@@ -117,7 +119,23 @@ def classify_shell(command: str) -> str:
         return "push"
     if re.search(r"\bgh(\.exe)?\s+pr\s+create\b", low):
         return "pr"
+    if re.search(r"\bgh(\.exe)?\s+pr\s+edit\b", low) and pr_title(text) is not None:
+        return "pr_title"
     return "other"
+
+
+def pr_title(command: str) -> str | None:
+    """The --title / -t value of a gh pr command, or None when it has none."""
+    try:
+        toks = shlex.split(command, posix=True)
+    except ValueError:
+        toks = command.split()
+    for i, tok in enumerate(toks):
+        if tok in ("--title", "-t") and i + 1 < len(toks):
+            return toks[i + 1]
+        if tok.startswith("--title="):
+            return tok.split("=", 1)[1]
+    return None
 
 
 def has_signoff(command: str) -> bool:
@@ -160,10 +178,20 @@ def check_shell(command: str, manifest_path: str | None = None) -> Result:
     if action == "commit" and not has_signoff(command):
         res.add("GRD-005", BLOCK, "git commit must be signed off (`git commit -s`)", evidence=command)
         return res.finish()
+    if action == "pr_title" and not manifest_path:
+        return res.finish()                  # renaming a PR outside a task is not a shipping action
     doc = _need_task(res, manifest_path, action)
     if doc is None:
         return res.finish()
     state = doc.get("current_state")
+    if action in ("pr", "pr_title"):
+        problem = pr_title_problem(doc, pr_title(command))
+        if problem:
+            res.add("GRD-009", BLOCK, problem, evidence=command,
+                    remediation="title format of mosip/pre-registration#1089: `<KEY>: <summary>`")
+            return res.finish()
+        if action == "pr_title":
+            return res.finish()
     if action == "commit":
         if state not in COMMIT_STATES:
             res.add("GRD-003", BLOCK, f"git commit is only allowed at QUALITY_GATE or COMMIT_PR, not {state}",

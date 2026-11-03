@@ -48,6 +48,7 @@ def doc(**over):
         "testcases": {"canonical_format": "none"},
         "repair": {"attempt_count": 0, "dev_attempt_count": 0, "attempt_history": [], "classification": ""},
         "reviews": {"implementation_review": "PASS", "fresh_context_review": "PASS"},
+        "tracker": {"system": "jira", "key": "MOSIP-1", "confirmed_by": "mohan", "closure": {"status": "declined", "reason": "r"}},
         "gates": [], "approvals": [], "evidence_refs": [], "github": {"issue": None, "subtasks": [], "pull_request": None},
         "test_plan": {"environment": "local docker-compose", "environment_kind": "local-stack"},
     }
@@ -458,7 +459,7 @@ def test_documentation_path_has_no_regression_or_second_review(tmp_path):
 
 
 def test_pr_closeout_loops_on_valid_comments(tmp_path):
-    d = doc(current_state="PR_CLOSEOUT", pr={"valid_comments_open": 1, "unresolved_threads": 0, "ci_status": "PASS", "monitoring": "app"}, gates=READY + [{"gate": "release_readiness", "status": "PASS"}])
+    d = doc(current_state="PR_CLOSEOUT", pr={"valid_comments_open": 1, "unresolved_threads": 0, "ci_status": "PASS", "monitoring": "app", "title": "MOSIP-1: x"}, gates=READY + [{"gate": "release_readiness", "status": "PASS"}])
     path = write(tmp_path, d)
     assert manifest.transition(path, "RELEASE_READINESS").status == "FAIL"
     assert manifest.transition(path, "IMPLEMENTATION").status == "PASS"
@@ -670,7 +671,7 @@ def test_usage_packet_dump_blocks(tmp_path):
 
 def test_pr_closeout_needs_monitoring_and_green_ci(tmp_path):
     d = doc(current_state="PR_CLOSEOUT", gates=READY + [{"gate": "release_readiness", "status": "PASS"}],
-            pr={"valid_comments_open": 0, "unresolved_threads": 1, "ci_status": "PENDING", "monitoring": "none"})
+            pr={"valid_comments_open": 0, "unresolved_threads": 1, "ci_status": "PENDING", "monitoring": "none", "title": "MOSIP-1: x"})
     msg = " ".join(f.message for f in manifest.transition(write(tmp_path, d), "RELEASE_READINESS").findings)
     assert "pr.ci_status" in msg and "pr.monitoring" in msg and "pr.unresolved_threads" in msg
     d["pr"].update(ci_status="FAIL", monitoring="app")
@@ -1139,11 +1140,14 @@ CLEAR_AC = {"id": "AC-1", "text": "POST /x with a missing name returns 400 and e
 
 
 def test_requirement_clarity_blocks_empty_and_unidentified(tmp_path):
-    d = doc()
+    d = doc(tracker={})
     found = ids(requirement_clarity.run(write(tmp_path, d)))
     assert {"REQ-001", "REQ-004"} <= found
     d["requirements"] = {"source_refs": ["MOSIP-1"], "acceptance_criteria": [CLEAR_AC], "open_ambiguities": 0}
     assert requirement_clarity.run(write(tmp_path, d, "ok.json")).status == "PASS"
+    d["requirements"]["source_refs"] = []                                       # the confirmed tracker key is identity too
+    d["tracker"] = {"system": "github", "key": "inji/pixelpass#185", "confirmed_by": "mohan"}
+    assert requirement_clarity.run(write(tmp_path, d, "gh.json")).status == "PASS"
 
 
 def test_requirement_clarity_blocks_vague_ac_and_open_questions(tmp_path):
@@ -1407,3 +1411,90 @@ def test_task_records_version_and_manifest_warns_on_drift(tmp_path, monkeypatch)
 def test_version_file_matches_plugin_manifest():
     from crewline import version as ver
     assert ver.run().status == "PASS"          # this Crewline: VERSION == plugin.json, valid semver
+
+
+# --- tracker ticket before any design or code (MAN-017) ------------------------------------------------------------
+def _intake(**over):
+    return doc(**{"current_state": "INPUT_VALIDATION", "tracker": {},
+                  "gates": [{"gate": "input_readiness", "status": "PASS"}], **over})
+
+
+def test_tracker_required_to_leave_input_validation(tmp_path):
+    d = _intake()
+    res = manifest.transition(write(tmp_path, d), "REQUIREMENT_ANALYSIS")
+    assert res.status == "FAIL" and "MAN-017" in ids(res)
+    d["tracker"] = {"system": "github", "key": "inji/pixelpass#185", "found_by": "search"}    # found, not yet confirmed
+    assert "MAN-017" in ids(manifest.transition(write(tmp_path, d), "REQUIREMENT_ANALYSIS"))
+    d["tracker"]["confirmed_by"] = "mohan"
+    assert manifest.transition(write(tmp_path, d), "REQUIREMENT_ANALYSIS").status == "PASS"
+    w = _intake(tracker={"waived": {"action": "tracker_waiver", **HUMAN}})                     # the user declined, with a reason
+    assert manifest.transition(write(tmp_path, w, "w.json"), "REQUIREMENT_ANALYSIS").status == "PASS"
+    assert manifest.transition(write(tmp_path, _intake(), "wait.json"), "WAITING_FOR_USER").status == "FAIL"  # needs resume_state
+    assert manifest.transition(write(tmp_path, _intake(resume_state="INPUT_VALIDATION"), "wait2.json"),
+                               "WAITING_FOR_USER").status == "PASS"                        # asking the user is always allowed
+
+
+def test_tracker_guard_on_every_template_resume_and_in_flight_task(tmp_path):
+    inc = _intake(task_type="incident", risk_tier="L0")
+    assert "MAN-017" in ids(manifest.transition(write(tmp_path, inc), "IMPACT_ANALYSIS"))
+    resumed = doc(current_state="WAITING_FOR_USER", resume_state="IMPACT_ANALYSIS", tracker={})
+    assert "MAN-017" in ids(manifest.transition(write(tmp_path, resumed, "r.json"), "IMPACT_ANALYSIS"))
+    legacy = doc(current_state="QUALITY_GATE")                                              # started before 0.7.1
+    legacy.pop("tracker")
+    assert "MAN-017" in ids(manifest.transition(write(tmp_path, legacy, "l.json"), "COMMIT_PR"))
+
+
+def test_tracker_record_rules(tmp_path):
+    def found(t, approvals=()):
+        return ids(manifest.check(write(tmp_path, doc(tracker=t, approvals=list(approvals)), "t.json")))
+    assert "MAN-017" in found({"system": "jira", "key": "#12", "confirmed_by": "mohan"})        # not a Jira key
+    assert "MAN-017" in found({"system": "github", "key": "PROJ-1", "confirmed_by": "mohan"})   # not a GitHub key
+    assert "MAN-017" in found({"key": "PROJ-1", "confirmed_by": "mohan"})                      # no system
+    assert "MAN-017" not in found({"system": "github", "key": "#12", "confirmed_by": "mohan"})
+    created = {"system": "jira", "key": "INJIVER-9", "confirmed_by": "mohan", "created_by_crewline": True}
+    assert "MAN-017" in found(created)                                                         # no create approval
+    assert "MAN-017" not in found(created, [{"action": "create_tracker_item", **HUMAN}])
+    assert "MAN-017" in found({**created, "waived": {"action": "tracker_waiver", **HUMAN}},
+                              [{"action": "create_tracker_item", **HUMAN}])                    # key and waiver
+    assert "MAN-010" in found({"system": "jira", "key": "INJIVER-9", "confirmed_by": "orchestrator"})
+    assert "MAN-010" in found({"waived": {"action": "tracker_waiver", **HUMAN, "approver": "claude"}})
+    assert "MAN-005" in found({"waived": {"action": "tracker_waiver", "approver": "mohan"}})
+    posted = {"system": "jira", "key": "INJIVER-9", "confirmed_by": "mohan", "closure": {"status": "posted", "ref": "c1"}}
+    assert "MAN-017" in found(posted)                                                          # comment needs approval
+    assert "MAN-017" not in found(posted, [{"action": "tracker_comment", **HUMAN}])
+
+
+def test_done_needs_tracker_closure_comment(tmp_path):
+    d = doc(current_state="FINAL_REPORT", final_report_ref="final-report.md", workspace={"checkout_mode": "single"},
+            tracker={"system": "jira", "key": "INJIVER-9", "confirmed_by": "mohan", "closure": {"status": "pending"}})
+    assert "tracker.closure.status" in manifest.transition(write(tmp_path, d), "DONE").to_text()
+    d["tracker"]["closure"] = {"status": "posted", "ref": "https://x/browse/INJIVER-9?focusedCommentId=1"}
+    d["approvals"] = [{"action": "tracker_comment", **HUMAN}]
+    assert manifest.transition(write(tmp_path, d), "DONE").status == "PASS"
+
+
+def test_branch_scope_accepts_tracker_keys(tmp_path):
+    from crewline.branch import key_pattern, manifest_keys
+    assert key_pattern("#185").search("feat: python sdk (#185)")
+    assert key_pattern("inji/pixelpass#185").search("INJIVER-1: fix #185")
+    assert not key_pattern("#18").search("fix #185")
+    assert not key_pattern("MOSIP-1").search("MOSIP-17633: x")                   # was a substring match before 0.7.1
+    assert key_pattern("MOSIP-1").search("MOSIP-1: x")
+    d = doc(tracker={"system": "github", "key": "inji/pixelpass#185", "confirmed_by": "mohan"},
+            requirements={"source_refs": [], "acceptance_criteria": [], "open_ambiguities": 0, "story_keys": ["INJIVER-1386"]})
+    assert manifest_keys(write(tmp_path, d)) == ["inji/pixelpass#185", "INJIVER-1386"]
+
+
+def test_task_new_has_empty_tracker():
+    from crewline.task import skeleton
+    assert skeleton("x", "feature")["tracker"] == {}
+
+
+def test_pr_title_recorded_with_key_before_leaving_pr_closeout(tmp_path):
+    pr = {"valid_comments_open": 0, "unresolved_threads": 0, "ci_status": "PASS", "monitoring": "app"}
+    d = doc(current_state="PR_CLOSEOUT", pr=dict(pr))
+    assert "no PR title" in manifest.transition(write(tmp_path, d), "RELEASE_READINESS").to_text()
+    d["pr"]["title"] = "Handle missing identity name fields"
+    assert "MAN-017" in ids(manifest.check(write(tmp_path, d)))
+    d["pr"]["title"] = "MOSIP-1: Handle missing identity name fields"
+    assert "MAN-017" not in ids(manifest.transition(write(tmp_path, d), "RELEASE_READINESS"))

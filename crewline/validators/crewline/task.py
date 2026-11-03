@@ -68,6 +68,7 @@ def skeleton(task_id: str, task_type: str) -> dict:
         "gates": [],
         "approvals": [],
         "evidence_refs": [],
+        "tracker": {},                      # INPUT_VALIDATION: linked, created on approval, or waived (MAN-017)
         "github": {"issue": None, "subtasks": [], "pull_request": None},
     }
 

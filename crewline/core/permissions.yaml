@@ -38,7 +38,11 @@ actions:
   onboard_module:               {tier: L1, default: allowed, approval: onboarding_review, note: "read-only on the module repo; drafts go to <module repo>/.crewline/; copying them into the repo is a separate L2 task"}
   grant_tool_permission:        {tier: L2, default: ask, approval: tool_permission, note: "a blocked action (core/tools.yaml permission_gated): user runs it / narrowest project allow rule / leave unverified; never a workaround"}
   approve_design:               {tier: L2, default: ask, approval: design, note: "material architecture, API contract or DB change"}
-  create_github_issue_subtasks: {tier: L1, default: draft, approval: user or team policy}
+  create_github_issue_subtasks: {tier: L1, default: draft, approval: user or team policy, note: "subtasks under tracker.key at GITHUB_PLANNING"}
+  link_tracker_item:            {tier: L0, default: ask, note: "INPUT_VALIDATION: a found GitHub issue / Jira item is linked only after the user confirms it (tracker.confirmed_by)"}
+  create_tracker_item:          {tier: L2, default: draft, approval: create_tracker_item, note: "INPUT_VALIDATION: no ticket found -> user picks GitHub or Jira (project key, issue type story/bug/task); draft title/body from the brief and ACs, show it, create only on this single-use approval (gh issue create / Jira connector createJiraIssue)"}
+  waive_tracker_item:           {tier: L0, default: ask, approval: tracker.waived, note: "the user declines a ticket; their reason is recorded as an approval-style record (MAN-005/010/017)"}
+  comment_on_tracker_item:      {tier: L2, default: draft, approval: tracker_comment, note: "PR_CLOSEOUT / FINAL_REPORT: closure comment (PR link, outcome, residual risks); posted only on this approval, or tracker.closure.status declined"}
   create_application_bug:       {tier: L1, default: draft, approval: explicit user confirmation every time, requires: "generated error report attached at creation after a secret scan; full report only with the actuator config dump removed; whitelisted excerpt + run command/env in the description"}
   reply_to_review_comment:      {tier: L2, default: allowed on the task's own PR (valid -> what changed; not valid -> reason), note: "reason cites code/evidence"}
   resolve_review_thread:        {tier: L2, default: allowed on the task's own PR after the thread has a fix or a reasoned reply, command: "gh api graphql resolveReviewThread", note: never without a reply}

@@ -30,7 +30,7 @@ Development (any repository)
 Git / PR
   python -m crewline secrets       <path>... [--base-dir <dir>] [--no-gitleaks]
   python -m crewline dco           --repo <dir> --range <base>..<head>
-  python -m crewline branch        --repo <dir> --upstream upstream/<branch> --base <sha> --story <KEY> [--allow <sha>] [--upstream-repo o/r --pr-repo o/r --pr-base <b>]
+  python -m crewline branch        --repo <dir> --upstream upstream/<branch> --base <sha> (--story <KEY> | --manifest <m>) [--allow <sha>] [--upstream-repo o/r --pr-repo o/r --pr-base <b>]
   python -m crewline version       [--repo <git root> --base <ref>]   (shipped changes must raise the plugin version)
   python -m crewline guard         --shell "<cmd>" | --write <path> [--manifest <m>] [--cwd <dir>]
                                     (platform hooks call this so commit/push/PR cannot skip the gates)
@@ -100,7 +100,8 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("branch")
     p.add_argument("--repo", required=True); p.add_argument("--upstream", required=True, help="e.g. upstream/develop")
     p.add_argument("--base", required=True, help="upstream base commit recorded at REPO_READY")
-    p.add_argument("--story", required=True); p.add_argument("--allow", action="append", default=[])
+    p.add_argument("--story", action="append", default=[], help="task key(s): Jira PROJ-1, GitHub #N or owner/repo#N")
+    p.add_argument("--manifest", help="read tracker.key + requirements.story_keys"); p.add_argument("--allow", action="append", default=[])
     p.add_argument("--upstream-repo"); p.add_argument("--pr-repo"); p.add_argument("--pr-base")
     p = sub.add_parser("tools"); p.add_argument("--only", action="append", default=[])
     p = sub.add_parser("pack")
@@ -204,7 +205,8 @@ def main(argv: list[str] | None = None) -> int:
         elif a.cmd == "dco":
             res = dco.run(a.repo, a.range)
         elif a.cmd == "branch":
-            res = branch.run(a.repo, a.upstream, a.base, a.story, a.allow, a.pr_repo, a.pr_base, a.upstream_repo)
+            keys = a.story + (branch.manifest_keys(a.manifest) if a.manifest else [])
+            res = branch.run(a.repo, a.upstream, a.base, keys, a.allow, a.pr_repo, a.pr_base, a.upstream_repo)
         elif a.cmd == "tools":
             res = tools.run(a.only)
         elif a.cmd == "pack":

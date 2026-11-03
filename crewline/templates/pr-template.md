@@ -1,7 +1,10 @@
-## {{type}}: {{summary}} ({{MOSIP-XXXXX}})
+<!-- PR title (mandatory, GRD-009 / MAN-017): `{{tracker.key}}: {{summary}}`, e.g. `MOSIP-38854: Handle missing identity name fields in NotificationService` -->
+## {{type}}: {{summary}}
+
+Closes / Refs {{tracker.url}} <!-- the task's tracker ticket (MAN-017); omit only when tracker.waived -->
 
 ### Scope
-- Task type: {{feature | bug-fix | refactor | ...}} · Module: {{...}} · Issue: {{link}}
+- Task type: {{feature | bug-fix | refactor | ...}} · Module: {{...}} · Ticket: {{tracker.key}} {{tracker.url | waived: reason}}
 - Files: {{n}}, all inside the approved paths ({{globs}})
 
 ### Acceptance criteria -> code -> tests

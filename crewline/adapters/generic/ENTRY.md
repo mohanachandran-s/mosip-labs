@@ -25,6 +25,12 @@ On every task:
    dependency-upgrade, database-migration, incident, release, test-automation, module-onboarding,
    documentation) and its risk tier. Create the task manifest
    (`{{CORE}}/templates/task-manifest.schema.json`) in the task workspace `<clone>/.crewline-work/tasks/<id>/` (excluded from git through .git/info/exclude; never committed).
+   **Tracker ticket (INPUT_VALIDATION, every task):** find the GitHub issue / Jira item (request, branch, commits,
+   `gh issue list --search`, Jira search) and ask the user to confirm it; none -> ask GitHub or Jira (project, type),
+   draft it from the brief + ACs, create it only on approval `create_tracker_item`; or record the user's waiver.
+   Nothing after INPUT_VALIDATION moves without it (MAN-017). Commit subjects carry `tracker.key`, the PR title
+   starts with it (`<KEY>: <summary>`, GRD-009); the closure
+   comment is posted on approval `tracker_comment` before DONE.
 3. S0_BOOTSTRAP_CHECK: `python -m crewline tools` (from `{{CORE}}/validators`) plus any connector/browser the task type needs.
    Missing -> stop and give the user the numbered steps from the merged tools (`core/tools.yaml` + active pack);
    never work around it.

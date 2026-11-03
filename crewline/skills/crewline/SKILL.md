@@ -34,6 +34,11 @@ RTK is optional.
 2. INTAKE: classify the request into one task type (`${CLAUDE_PLUGIN_ROOT}/core/workflows/`: feature, bug-fix, refactor,
    dependency-upgrade, database-migration, incident, release, test-automation) and its risk tier. Create the task manifest
    (`${CLAUDE_PLUGIN_ROOT}/templates/task-manifest.schema.json`) in the task workspace `<clone>/.crewline-work/tasks/<id>/`, never in a repository.
+   **Tracker ticket before design or code** (INPUT_VALIDATION, every task; MAN-017): link the user-confirmed GitHub
+   issue / Jira item, or draft one and create it in the system the user picks only on approval `create_tracker_item`,
+   or record their waiver. Commit subjects carry `tracker.key`; the PR title starts with it
+   (`<KEY>: <summary>`, GRD-009); closure comment on approval `tracker_comment`
+   (orchestrator step 2b).
 3. S0_BOOTSTRAP_CHECK: `crewline tools` (from `${CLAUDE_PLUGIN_ROOT}/validators`) plus any connector/browser the task type needs.
    Missing -> stop and give the user the numbered steps from the merged tools (`core/tools.yaml` + active pack);
    never work around it.

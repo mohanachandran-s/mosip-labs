@@ -42,7 +42,7 @@ Change scope: {{n}} files, all inside approved paths | scope_change approvals: {
 SDET loop: {{attempts}} · Development loop: {{attempts}} · Escalations: {{reason or none}}
 
 ## GitHub / Jira
-Issue {{link}} · PR {{link}} · review comments {{valid fixed / not valid replied}} · Bugs: {{key}} with {{error report, excerpt}}
+Ticket {{tracker.system}} {{tracker.key}} ({{linked | created by Crewline on approval | waived: reason}}) · closure comment {{posted link | declined: reason}} · PR {{link}} · review comments {{valid fixed / not valid replied}} · Bugs: {{key}} with {{error report, excerpt}}
 
 ## Release
 {{NOT_APPLICABLE | readiness, rollback plan, environment, deployment record, post-deployment checks}}

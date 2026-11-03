@@ -23,7 +23,7 @@ capabilities:
       - 'Tell the assistant its path; it merges values into the worktree config, marks it skip-worktree, and restores it after the run.'
 
   jira_connector:
-    needed_for: [create_application_bug, bug comments]
+    needed_for: [INPUT_VALIDATION (tracker.system jira), create_application_bug, bug comments, tracker closure comment]   # overrides the core entry with the MOSIP site
     check: {adapter: "Atlassian tools present; getAccessibleAtlassianResources lists mosip.atlassian.net with write:jira-work"}
     enable:
       - 'In the Claude desktop app, open Settings → Connectors.'

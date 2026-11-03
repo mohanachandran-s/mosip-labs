@@ -3,7 +3,7 @@
   REQ-001  code/test task has no acceptance criteria                                              BLOCK
   REQ-002  an AC is too short or uses a non-observable phrase (should work, TBD, as expected, …) BLOCK
   REQ-003  requirements.open_ambiguities is not 0                                                 BLOCK
-  REQ-004  no story/bug identity (story_keys or source_refs)                                      BLOCK
+  REQ-004  no story/bug identity (story_keys, source_refs or tracker.key)                         BLOCK
 
 IMPACT_ANALYSIS and TESTCASE_DESIGN are refused until this PASSes. The agent must not invent
 business rules to fill a gap (WAITING_FOR_USER with one focused question instead).
@@ -42,6 +42,8 @@ def run(manifest_path: str) -> Result:
     acs = req.get("acceptance_criteria") or []
     keys = [k for k in (req.get("story_keys") or []) if str(k).strip()]
     refs = [s for s in (req.get("source_refs") or []) if str(s).strip()]
+    if (doc.get("tracker") or {}).get("key"):                # the confirmed GitHub issue / Jira item (MAN-017)
+        refs.append(doc["tracker"]["key"])
     if not acs:
         res.add("REQ-001", BLOCK, "no acceptance criteria: do not guess the story/bug; ask the owner",
                 remediation="requirement-analyst writes AC-1..n with an observable outcome; open_ambiguities until then")
@@ -50,7 +52,7 @@ def run(manifest_path: str) -> Result:
         res.add("REQ-003", BLOCK, f"open_ambiguities={n_amb!r}: IMPACT_ANALYSIS / TESTCASE_DESIGN stay blocked "
                 "(WAITING_FOR_USER with one focused question whose answer changes an expected result)")
     if not keys and not refs:
-        res.add("REQ-004", BLOCK, "no story/bug identity (requirements.story_keys or source_refs)",
+        res.add("REQ-004", BLOCK, "no story/bug identity (requirements.story_keys, source_refs or tracker.key)",
                 remediation="record the Jira/GitHub key before analysis; do not invent the requirement")
     for ac in acs:
         aid = ac.get("id", "?")

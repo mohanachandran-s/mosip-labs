@@ -436,6 +436,81 @@
         "type": "string"
       }
     },
+    "tracker": {
+      "type": "object",
+      "description": "The GitHub issue or Jira item this task belongs to, settled at INPUT_VALIDATION before any design or code (core/workflow.yaml tracker_guard, MAN-017): linked after the user confirmed it, created by Crewline on approval create_tracker_item, or waived by a human with a reason.",
+      "properties": {
+        "system": {
+          "enum": [
+            "github",
+            "jira"
+          ]
+        },
+        "key": {
+          "type": "string",
+          "description": "github: owner/repo#N (or #N on the primary upstream repo); jira: PROJ-123. Task commit subjects carry it (crewline branch BR-002); the PR title/body link it"
+        },
+        "url": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "issue_type": {
+          "type": "string",
+          "description": "jira: story | bug | task (or the project's own type); github: the label used"
+        },
+        "found_by": {
+          "enum": [
+            "request",
+            "branch",
+            "commit",
+            "search",
+            "created"
+          ],
+          "description": "where the ticket came from"
+        },
+        "created_by_crewline": {
+          "type": "boolean",
+          "description": "true needs an approval record with action create_tracker_item (MAN-017)"
+        },
+        "confirmed_by": {
+          "type": "string",
+          "description": "the human who confirmed the link or approved the creation; never an agent (MAN-010)"
+        },
+        "linked_at": {
+          "type": "string"
+        },
+        "waived": {
+          "$ref": "#/$defs/approval",
+          "description": "the user declined a ticket: action tracker_waiver, approver, reason, scope, timestamp"
+        },
+        "closure": {
+          "type": "object",
+          "description": "closure comment on the ticket at PR_CLOSEOUT / FINAL_REPORT (FINAL_REPORT->DONE guard)",
+          "properties": {
+            "status": {
+              "enum": [
+                "pending",
+                "posted",
+                "declined"
+              ]
+            },
+            "ref": {
+              "type": "string",
+              "description": "comment URL or id when posted"
+            },
+            "at": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string",
+              "description": "why the user declined it"
+            }
+          }
+        }
+      }
+    },
     "github": {
       "type": "object",
       "properties": {
@@ -443,7 +518,8 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "legacy: the GitHub issue; tracker.key is the source of truth"
         },
         "subtasks": {
           "type": "array",
@@ -626,6 +702,10 @@
     "pr": {
       "type": "object",
       "properties": {
+        "title": {
+          "type": "string",
+          "description": "the PR title as on GitHub; starts with the tracker key, `<KEY>: summary` (MAN-017 when leaving PR_CLOSEOUT, GRD-009 on gh pr create/edit)"
+        },
         "valid_comments_open": {
           "type": "integer",
           "minimum": 0

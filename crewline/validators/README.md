@@ -11,8 +11,8 @@ Result fields: `validator, status, summary, findings[rule_id, severity BLOCK|WAR
 | `expected-diff` | EXP-001..009 | Base ref vs working tree; BLOCK unless `--approvals` has an attributed record. Refuses (NOT_RUN) when the base shows no YAML |
 | `secrets` | SEC-001..005 / SEC-GL | Uses `gitleaks` when on PATH; values are never printed (sha256 fingerprint only) |
 | `dco` | DCO-001..002 | Signed-off-by present and matching the author email, per non-merge commit |
-| `manifest` | MAN-001..013, TRN-001..003 | Schema + invariants; `--to <STATE> [--apply]` enforces `core/workflow.yaml` + the task-type template (path projection, template guards, required gates), both repair caps, single-use human approvals, reviewer independence, risk tier, linked-change rules |
-| `branch` | BR-001..005 | Fork model: branch cut from the recorded upstream base, only story-key commits (or `--allow`), no merges, PR target = upstream repo/branch |
+| `manifest` | MAN-001..017, TRN-001..003 | Schema + invariants; tracker ticket before any state after INPUT_VALIDATION (MAN-017); `--to <STATE> [--apply]` enforces `core/workflow.yaml` + the task-type template (path projection, template guards, required gates), both repair caps, single-use human approvals, reviewer independence, risk tier, linked-change rules |
+| `branch` | BR-001..005 | Fork model: branch cut from the recorded upstream base, only commits whose subject carries a task key (`--story` and/or `--manifest`: tracker.key, story_keys; Jira `PROJ-1`, GitHub `#N` / `owner/repo#N`, word-bounded) (or `--allow`), no merges, PR target = upstream repo/branch |
 | `scope` | SCOPE-001..002 | Decides the test scope from the change: TARGETED (only new cases → those + `$ID` producers) or FULL |
 | `regression` | REG-001..006 | Base vs branch from TestRig Extent full reports or JUnit/surefire XML: blocks pass→fail and failing new tests without an exception |
 | `tools` | TOOL-000..002 | Local capabilities from `core/tools.yaml` + active pack overlay; prints numbered enable steps for anything missing |
@@ -36,7 +36,7 @@ Result fields: `validator, status, summary, findings[rule_id, severity BLOCK|WAR
 | `usage` | USE-001..008 | API-reported tokens per stage/step; `core/usage-budget.yaml` caps (USE-003/004); packet dumps (USE-007/008). Gate `token_budget` |
 | `discover` | DSC-001..009 | Module onboarding: reads poms, tests, CI, DB scripts, deploy, guidance files, API TestRig suites and coding-standard checkers read-only; writes evidence-labelled drafts (`.crewline/development/`, `.crewline/qa/`, profile) and a validator baseline |
 | `diff-coverage` | DCV-001..004 | JaCoCo XML or lcov.info (Jest/Vitest) + git diff: share of changed executable production lines executed by tests (default 80%); unreported files and stale reports block |
-| `guard` | GRD-001..008 | Platform hooks: deny commit/push/PR without an active task and COMMIT_PR gates; always deny force-push, `--no-verify`, hard reset, stash, branch delete, merge, production deploy; deny raw log dumps and unwrapped test suites (GRD-007); deny Read of dumps / files over `read_max_bytes` (GRD-008) |
+| `guard` | GRD-001..009 | Platform hooks: deny commit/push/PR without an active task and COMMIT_PR gates; always deny force-push, `--no-verify`, hard reset, stash, branch delete, merge, production deploy; deny raw log dumps and unwrapped test suites (GRD-007); deny Read of dumps / files over `read_max_bytes` (GRD-008); `gh pr create` / `gh pr edit --title` without the `<tracker key>: ` prefix (GRD-009) |
 | `task` | TSK-001..006 | queue + `export`/`import` of manifest, packets and evidence JSON (logs omitted) |
 
 Per-module rules: `<module repo>/.crewline/qa/profile.yaml`. Every rule there cites the repository evidence it came from.

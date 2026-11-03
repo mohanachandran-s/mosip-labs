@@ -10,9 +10,9 @@ from crewline.result import EXIT
 
 CORE = Path(__file__).resolve().parents[2]
 MOSIP_CAPS = {
-    "java21", "maven", "test_credentials", "jira_connector", "browser_upload",
+    "java21", "maven", "test_credentials", "browser_upload",
     "coverage_cli", "module_build", "branch_test_env",
-}
+}   # jira_connector is core (tracker ticket at INPUT_VALIDATION); the MOSIP pack overrides it with its site
 
 
 def test_default_pack_is_mosip():
@@ -29,6 +29,7 @@ def test_core_tools_have_no_mosip_stack():
     caps = spec["capabilities"]
     assert "git" in caps and "python" in caps and "permission_gated" in spec
     assert MOSIP_CAPS.isdisjoint(caps)
+    assert "mosip" not in str(caps["jira_connector"]).lower()
 
 
 def test_mosip_merge_adds_stack_and_keeps_enable_steps(monkeypatch):

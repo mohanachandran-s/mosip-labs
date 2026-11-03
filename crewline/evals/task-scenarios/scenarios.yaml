@@ -239,3 +239,11 @@ scenarios:
     name: Installed adapter drift fixed by --sync; CI re-renders
     expected: install.py --sync --check rewrites a tampered rule; GitHub workflow runs pytest, frozen pack, adapter --sync/--check
     automated_by: test_guard.py::test_install_sync_rewrites_drift, ::test_install_check_detects_drift
+  - id: EV-60
+    name: Tracker ticket before design or code
+    expected: no state after INPUT_VALIDATION (any template, a WAITING_FOR_USER resume, a task already in flight) without a user-confirmed GitHub issue / Jira key or a human waiver (MAN-017); creation needs approval create_tracker_item; FINAL_REPORT -> DONE needs the closure comment posted on approval or declined; branch scope accepts the key (#N, owner/repo#N, PROJ-1) with word boundaries
+    automated_by: test_sdlc.py::test_tracker_required_to_leave_input_validation, ::test_tracker_guard_on_every_template_resume_and_in_flight_task, ::test_tracker_record_rules, ::test_done_needs_tracker_closure_comment, ::test_branch_scope_accepts_tracker_keys
+  - id: EV-61
+    name: PR title prefixed with the tracker key
+    expected: "gh pr create / gh pr edit --title refused (GRD-009) unless the title starts with `<KEY>: ` (Jira key, GitHub #N or owner/repo#N); not when waived; leaving PR_CLOSEOUT needs pr.title with the prefix (MAN-017)"
+    automated_by: test_guard.py::test_pr_title_must_start_with_tracker_key, test_sdlc.py::test_pr_title_recorded_with_key_before_leaving_pr_closeout

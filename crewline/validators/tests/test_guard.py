@@ -31,6 +31,7 @@ def write_manifest(tmp_path, **over):
                   ("quality_gate", "deterministic_validation", "change_scope", "secrets", "token_budget")],
         "approvals": [{"action": "commit_pr", **HUMAN}],
         "evidence_refs": [],
+        "tracker": {"system": "jira", "key": "MOSIP-1", "confirmed_by": "mohan", "closure": {"status": "declined", "reason": "r"}},
         "github": {"issue": None, "subtasks": [], "pull_request": None},
         "test_plan": {"environment": "n/a", "environment_kind": "local-stack"},
     }
@@ -45,6 +46,8 @@ def write_manifest(tmp_path, **over):
     ("git commit -sm MOSIP-1", "commit"),
     ("git push origin HEAD", "push"),
     ("gh pr create --title x", "pr"),
+    ("gh pr edit 12 --title 'MOSIP-1: x'", "pr_title"),
+    ("gh pr edit 12 --add-label bug", "other"),
     ("git push --force origin HEAD", "deny_force"),
     ("git push -f", "deny_force"),
     ("git reset --hard HEAD~1", "deny_destructive"),
@@ -379,3 +382,25 @@ def test_installing_the_plugin_enables_it():
     """A local-scope install writes the plugin's default into settings.local.json, which overrides the module's opt-in:
     with defaultEnabled false a new user followed the README and still had Crewline off."""
     assert json.loads((ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8")).get("defaultEnabled", True) is True
+
+
+def test_pr_title_must_start_with_tracker_key(tmp_path):
+    """mosip/pre-registration#1089 format: `MOSIP-38854: Handle missing identity name fields`."""
+    ready = dict(current_state="COMMIT_PR",
+                 approvals=[{"action": "commit_pr", **HUMAN}, {"action": "push_and_pr", **HUMAN}],
+                 gates=[{"gate": g, "status": "PASS"} for g in
+                        ("quality_gate", "deterministic_validation", "change_scope", "secrets", "dco", "branch_scope")])
+    m = write_manifest(tmp_path, **ready)
+    for bad in ('gh pr create --title "Fix notification NPE"', "gh pr create --fill",
+                'gh pr create --title "Fix MOSIP-1 in notification"', 'gh pr edit 7 --title "fix"'):
+        res = guard.check_shell(bad, m)
+        assert res.status == "FAIL" and "GRD-009" in ids(res), bad
+    for good in ('gh pr create --title "MOSIP-1: Handle missing name" --body x',
+                 "gh pr create -t 'MOSIP-1 : Negative coverage'", 'gh pr edit 7 --title="MOSIP-1: renamed"'):
+        assert "GRD-009" not in ids(guard.check_shell(good, m)), good
+    gh = write_manifest(tmp_path, tracker={"system": "github", "key": "inji/pixelpass#185", "confirmed_by": "mohan"}, **ready)
+    assert "GRD-009" not in ids(guard.check_shell('gh pr create --title "#185: Python SDK"', gh))
+    assert "GRD-009" not in ids(guard.check_shell('gh pr create --title "inji/pixelpass#185: Python SDK"', gh))
+    waived = write_manifest(tmp_path, tracker={"waived": {"action": "tracker_waiver", **HUMAN}}, **ready)
+    assert "GRD-009" not in ids(guard.check_shell('gh pr create --title "anything"', waived))
+    assert guard.check_shell('gh pr edit 7 --title "fix"', None).status == "PASS"     # no active task: not a shipping action

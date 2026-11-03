@@ -15,7 +15,7 @@ commit/push, so a chat cannot pass for a done SDLC. [Why Crewline on Cursor or C
 
 | | |
 |---|---|
-| Version | `0.7.0` (see `VERSION`) |
+| Version | `0.7.1` (see `VERSION`) |
 | Design | `../AI_Engineering_Agent_Full_SDLC_Implementation_Blueprint_v2.1.html` (authoritative) and `../AI_Engineering_Agent_Full_SDLC_Updated_Plan_v1.3.html` |
 | Lineage | Copied from the SDET Architect Assistant 0.2.0. Its proven workflow is the `test-automation` task type and the `agents/qa/` specialty |
 | Pilots | **PILOT-001** (test automation): [mosip/pre-registration#1088](https://github.com/mosip/pre-registration/pull/1088) · **PILOT-002** (bug fix MOSIP-38854): [mosip/pre-registration#1089](https://github.com/mosip/pre-registration/pull/1089) |
@@ -361,7 +361,7 @@ and records every transition with a timestamp.
 
 ```mermaid
 flowchart TB
-    P1["<b>1 · Intake and requirements</b><br/>S0_BOOTSTRAP_CHECK → INTAKE → INPUT_VALIDATION<br/>→ REQUIREMENT_ANALYSIS ⇄ ACCEPTANCE_REVIEW"]
+    P1["<b>1 · Intake and requirements</b><br/>S0_BOOTSTRAP_CHECK → INTAKE → INPUT_VALIDATION (tracker ticket)<br/>→ REQUIREMENT_ANALYSIS ⇄ ACCEPTANCE_REVIEW"]
     P2["<b>2 · Analysis, design, tests first</b><br/>IMPACT_ANALYSIS → DESIGN<br/>→ TESTCASE_DESIGN ⇄ TESTCASE_REVIEW"]
     P3["<b>3 · Plan and branch</b><br/>IMPLEMENTATION_PLAN → GITHUB_PLANNING → REPO_READY<br/>(approved paths · base branch asked)"]
     P4["<b>4 · Build, test, review</b><br/>IMPLEMENTATION → DETERMINISTIC_VALIDATION → UNIT_INTEGRATION_TEST<br/>→ IMPLEMENTATION_REVIEW → FRESH_CONTEXT_REVIEW → SYSTEM_TEST_EXECUTION"]
@@ -576,6 +576,7 @@ flowchart TB
 - **Every user-facing criterion is automated:** an `api` or `ui` acceptance criterion without a system-level automated test is blocked (TRC-008). One without a result on the branch build is blocked too (TRC-009).
 - **System tests and regression can't be quietly skipped:** they can't be marked "not applicable" in code flows (MAN-015). The only way to skip them is a human-approved deferral to a named environment and date; the post-merge run then becomes a follow-up task.
 - **No PR with an open defect:** the PR is refused while a defect caused by the change is open, or while a pre-existing one hasn't been raised (MAN-014).
+- **No design or code without a ticket:** nothing moves past INPUT_VALIDATION, in any task type, until a GitHub issue or Jira item is linked and the user confirmed it, Crewline created one on the user's approval (`create_tracker_item`), or the user waived it with a reason (MAN-017, `tracker_guard`). Tasks already past INPUT_VALIDATION are caught at their next move. DONE needs the closure comment on the ticket posted on approval (`tracker_comment`) or declined.
 - **Where it can run:** an environment where CI deploys the PR image, or a local stack (the module's docker-compose or a local service run). MOSIP pack: options in `packs/mosip/tools.yaml` `branch_test_env`. Generic pack: the environment named in `test_plan.environment` and the module's own suite.
 
 ## 8. Failures, repairs and escalation
@@ -611,7 +612,10 @@ flowchart TB
 1. Ask the **upstream** base branch before any branch exists (approval `base_branch`).
 2. Cut a worktree and branch from that upstream ref exactly; never from local or `origin`.
 3. Carry only the task's commits. Origin- or local-only changes go in only on explicit request.
-4. Sign every commit (`git commit -s`, DCO) and put the story key in the message.
+4. Sign every commit (`git commit -s`, DCO) and put the tracker key in the subject (Jira `PROJ-1` or GitHub `#N`;
+   `crewline branch --manifest <m>` reads `tracker.key` + `requirements.story_keys`, BR-002).
+   The PR title starts with the key: `<KEY>: <summary>` (e.g. `MOSIP-38854: Handle missing identity name fields in
+   NotificationService`); the hook refuses `gh pr create` / `gh pr edit --title` otherwise (GRD-009).
 5. Push to `origin` (the fork) and open the PR against the same upstream branch.
 
 **Linked changes:** when a module needs a change in a dependency (e.g. apitest-commons), each repo gets:
@@ -661,7 +665,7 @@ Run from `validators/`: `python -m crewline [--json] <command> ...`. Exit codes:
 
 | Command | Rules | Checks |
 |---|---|---|
-| `manifest` | MAN-001..013, TRN-001..003 | schema; template projection; guards; both repair caps; human single-use approvals; reviewer independence; risk tier; required gates; linked repos. `--to <STATE> [--apply]` |
+| `manifest` | MAN-001..017, TRN-001..003 | schema; template projection; guards; both repair caps; human single-use approvals; reviewer independence; risk tier; required gates; linked repos. `--to <STATE> [--apply]` |
 | `run` / `evidence` | EVD-001..004 | runs the command and records exit code, commit and worktree digest; rejects stale or incomplete records. `run` also prints a CLIP-002 digest of the log |
 | `clip` | CLIP-001..002 | digest of a log (`--file`) or of a command (`clip -- <cmd>`); cap `clip_max_chars` |
 | `change-scope` | SCP-001..003 | changed files inside `scope.approved_paths`; CI/build/deploy/config files always need `scope_change` |
@@ -686,7 +690,7 @@ Run from `validators/`: `python -m crewline [--json] <command> ...`. Exit codes:
 | `pack` | PCK-001..002 | show / list / `--set` product pack (`mosip` default, `generic` for a non-MOSIP repo) |
 | `usage` | USE-001..009 | token usage per task/stage/step **and** budget stop (`token_budget` gate); packet size; `--apply` stamps a mark (USE-009) |
 | `discover` | DSC-001..009 | module onboarding: reads poms, tests, CI, DB scripts, deploy, guidance, TestRig suites and coding-standard checkers read-only; writes evidence-labelled drafts and a baseline |
-| `guard` | GRD-001..008 | commit/push/PR gated; force-push / `--no-verify` / prod always denied; **GRD-007** raw log dump or suite not via `crewline run`; **GRD-008** Read of a dump or file over `read_max_bytes` |
+| `guard` | GRD-001..009 | commit/push/PR gated; **GRD-009** PR title not prefixed `<tracker key>: `; force-push / `--no-verify` / prod always denied; **GRD-007** raw log dump or suite not via `crewline run`; **GRD-008** Read of a dump or file over `read_max_bytes` |
 | `testcase` · `expected-diff` · `scope` · `coverage` | NAME/DEP · EXP-001..009 · SCOPE · COV | API TestRig: IDs, `$ID:` chains, weakened expectations, targeted vs full scope, CoverageCli |
 
 ---
@@ -738,6 +742,7 @@ Each task has its own workspace, `<clone>/.crewline-work/tasks/<id>/`, inside th
 |---|---|
 | `task_type`, `risk_tier` | selects the template; tier only rises |
 | `current_state`, `resume_state`, `state_history` | where the task is; every applied transition with time and note |
+| `tracker` | the GitHub issue / Jira item: `system`, `key`, `url`, `found_by`, `created_by_crewline`, `confirmed_by`, `linked_at`, or `waived` (approval record); `closure` comment status (MAN-017) |
 | `scope.repositories[]`, `scope.approved_paths` | repos (role, upstream, base branch, PR, `depends_on`, `version_link`) and the file globs the plan allows |
 | `requirements.acceptance_criteria[]` | `id`, `text`, `api`, `code_refs`, `test_ids`, `component_test_ids`, `matrix_row_ids` |
 | `gates[]` | status, rationale, evidence, `checked_at_commit` |

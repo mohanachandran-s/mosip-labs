@@ -9,6 +9,43 @@ because Claude Code updates an installed plugin only when that version changes. 
   changed for them.
 - **MAJOR**: a change that can break a task in progress (state machine, manifest schema). Finish or restart open tasks.
 
+## 0.7.1
+Every task has a tracker ticket before any design or code. Found on inji/pixelpass PP-PYSDK and PP-PYSDK-HARDEN:
+GITHUB_PLANNING was a pass-through (8 seconds, `github.issue: null`) and Crewline never looked for or created a Jira item.
+- New `tracker` block on the manifest (`system` github|jira, `key`, `url`, `title`, `issue_type`, `found_by`,
+  `created_by_crewline`, `confirmed_by`, `linked_at`, `waived`, `closure`). `crewline task new` writes it empty.
+- `core/workflow.yaml` `tracker_guard`: every move into a state after INPUT_VALIDATION, in every template, needs a key
+  the user confirmed or a human waiver (MAN-017). It also applies to a WAITING_FOR_USER resume and to tasks already
+  past INPUT_VALIDATION, which are stopped at their next move until they link or waive.
+- INPUT_VALIDATION (orchestrator step 2b): find a ticket (request, branch, commits, `gh issue list --search`, Jira
+  search) and ask the user to confirm it; else ask GitHub or Jira (project, type story/bug/task), draft it from the
+  brief and ACs, create it only on the new single-use approval `create_tracker_item` (L2); or record the user's waiver.
+  New permissions: `link_tracker_item`, `create_tracker_item`, `waive_tracker_item`, `comment_on_tracker_item`.
+- MAN-017 also checks the record: key format per system (`owner/repo#N` / `#N`, `PROJ-123`), `created_by_crewline`
+  without the approval, both a key and a waiver, a posted closure comment without approval `tracker_comment`.
+  An agent as `confirmed_by` or waiver approver is MAN-010; a waiver without approver/reason/scope/timestamp is MAN-005.
+- FINAL_REPORT -> DONE: the closure comment on the ticket is posted on approval or declined (`tracker.closure`).
+- `crewline branch`: `--manifest` reads `tracker.key` + `requirements.story_keys`; `--story` is repeatable and takes a
+  GitHub `#N` / `owner/repo#N`. Keys are word-bounded: `MOSIP-1` no longer matches a `MOSIP-17633` subject.
+- `requirement-clarity` REQ-004 accepts `tracker.key` as the story/bug identity.
+- `core/tools.yaml`: generic `jira_connector` (Atlassian MCP connector) and `github_cli` needed at INPUT_VALIDATION;
+  the MOSIP pack keeps its site-specific `jira_connector`. A missing tool for the chosen system stops with the enable steps.
+- PR title starts with the tracker key, `<KEY>: <summary>` (as mosip/pre-registration#1089:
+  `MOSIP-38854: Handle missing identity name fields in NotificationService`; GitHub `#185: ...` or `owner/repo#185: ...`).
+  The hook refuses `gh pr create` / `gh pr edit --title` otherwise (GRD-009, skipped when the ticket was waived);
+  `pr.title` is recorded and checked before leaving PR_CLOSEOUT (MAN-017). PR template body links the ticket. Final report: ticket and closure comment. Eval EV-60.
+- Version: this adds a gate, which the policy above calls MINOR; it ships as 0.7.1 because 0.7.0 is still unmerged
+  (fork PR #112) and the user chose to keep it on that PR.
+
+Known gaps found on the same run, not changed here:
+- The 3-attempt repair cap cannot be lifted by a human approval; only S_ESCALATE is legal. Nothing says so plainly.
+- The FRESH_CONTEXT_REVIEW entry guard refuses an implementation review recorded as `WAIVED`.
+- `diff-coverage`'s default `--include` is Java-only.
+- RFT-005 test globs miss Python tests.
+- `crewline manifest --to` prints "0 blocking" on a FAIL: `check()` sets the summary and `transition()` keeps it.
+- Plugin hooks judge a write against the active task of the session's folder, not the repository the file is in (an
+  edit to another repo is refused as GRD-004 of an unrelated task), and do not see files written from a Bash script.
+
 ## 0.7.0
 System tests and regression must be the module's own suites, and specialist states need their specialist. Found on
 INJIVERIFY-2464: a bug-fix passed system_tests with a hand-made browser check, full_regression with a jest run, and its

@@ -22,12 +22,21 @@ capabilities:
       - 'Run: `pip install -r <assistant>/validators/requirements.txt`.'
 
   github_cli:
-    needed_for: [GITHUB_PLANNING, PR_CLOSEOUT, PR checks]
+    needed_for: [INPUT_VALIDATION (tracker.system github), GITHUB_PLANNING, PR_CLOSEOUT, PR checks]
     check: {command: "gh auth status"}
     enable:
       - 'Install GitHub CLI from https://cli.github.com.'
       - 'Run `gh auth login`, choose GitHub.com, HTTPS, and log in with the browser.'
       - 'Run `gh auth status`; it must show your account (the fork owner).'
+
+  jira_connector:
+    needed_for: [INPUT_VALIDATION (tracker.system jira), PR_CLOSEOUT / FINAL_REPORT closure comment]
+    check: {adapter: "the Atlassian MCP connector answers: getAccessibleAtlassianResources lists the site, and searchJiraIssuesUsingJql runs"}
+    enable:
+      - 'Claude desktop / claude.ai: Settings -> Connectors -> add Atlassian (Jira + Confluence), sign in with the account that can create issues in the project.'
+      - 'Claude Code CLI: run `/mcp`, pick the Atlassian server and authenticate in the browser.'
+      - 'Cursor / other: add the Atlassian remote MCP server (https://mcp.atlassian.com/v1/sse) and sign in.'
+      - 'Tell the assistant it is done; it re-checks by listing your Jira sites. Or choose GitHub, or create the item yourself and give the key.'
 
   upstream_fetch:
     needed_for: [REPO_READY]

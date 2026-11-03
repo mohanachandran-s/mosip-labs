@@ -38,6 +38,23 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
    `regression` on surefire/JUnit XML). Never treat MOSIP facts as core.
 1. INTAKE: classify the request into one `task_type` (feature, bug-fix, refactor, dependency-upgrade, database-migration, incident, release, test-automation, module-onboarding, documentation). A request for a module that has no `<module repo>/.crewline/` yet starts with a `module-onboarding` task first. When it mixes types (a feature that needs a migration), use the stricter template (`database-migration`) or split it into linked tasks. Set `risk_tier` from the template; raise it when the change touches auth, crypto, PII, money-like flows or shared libraries; never lower it.
 2. S0_BOOTSTRAP_CHECK: run `python -m crewline tools` for the capabilities this task type needs (merged core + pack `needed_for`). Missing -> WAITING_FOR_USER with the numbered `enable` steps; re-check after the user confirms. At ANY state, if the platform refuses an action (permission denied, safety classifier, sandbox), do not retry it in another form: WAITING_FOR_USER, show the `permission_gated` options for that capability (recommended first), record the answer as approval `tool_permission`, then continue per the answer (a granted rule is the narrowest listed, in project settings, added only with the user's approval).
+2b. INPUT_VALIDATION, **tracker ticket before any design or code** (core/workflow.yaml `tracker_guard`, MAN-017; every
+    task type). (a) Look for one: a key or URL in the request, the branch name, recent commit subjects, then a search
+    (`gh issue list --repo <upstream> --search "<words>" --state all`; Jira: `searchJiraIssuesUsingJql` when the
+    Atlassian connector answers). (b) Found -> show it and ask the user to confirm (`link_tracker_item`); record
+    `tracker.system/key/url/title/found_by/confirmed_by/linked_at`. (c) None -> ask GitHub or Jira (Jira: project key and
+    issue type story/bug/task). The chosen system's tool missing (`gh auth status`; `jira_connector`) -> WAITING_FOR_USER
+    with its numbered enable steps. Draft title + body from the brief and ACs (templates/issue-template.md), show it, and
+    create it only on a single-use approval `create_tracker_item` (`gh issue create` / `createJiraIssue`); record
+    `created_by_crewline: true`, `found_by: created`. (d) The user declines -> `tracker.waived` (action `tracker_waiver`,
+    approver, reason, scope, timestamp). Never confirm, create or waive on the user's behalf.
+    Downstream: subtasks at GITHUB_PLANNING go under `tracker.key`; every task commit subject carries the key (Jira
+    `PROJ-1`, GitHub `#N`) and `crewline branch --manifest <m>` checks it (BR-002); the PR title **starts** with it, `<KEY>: <summary>`
+    (e.g. `MOSIP-38854: Handle missing identity name fields`; GitHub `#185: ...`), the hook refuses `gh pr create` /
+    `gh pr edit --title` otherwise (GRD-009), and `pr.title` is recorded before leaving PR_CLOSEOUT (MAN-017); the body
+    links the ticket (`Closes`/`Refs`). At PR_CLOSEOUT / FINAL_REPORT draft a closure comment (PR link, outcome, residual risks),
+    post it only on approval `tracker_comment` and record `tracker.closure` (status posted + ref, or declined + reason):
+    FINAL_REPORT -> DONE needs it.
 3. Before every transition run `python -m crewline manifest <manifest> --to <STATE>`; move only with `--apply`. Never move state when it exits non-zero.
 3c. Before IMPACT_ANALYSIS / TESTCASE_DESIGN (feature, bug-fix, test-automation, database-migration): run
     `python -m crewline requirement-clarity --manifest <m>` and record gates `requirement_clarity` and
@@ -63,7 +80,7 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
    (`git fetch origin <headRef>`, `git worktree add <path> -b <headRef> origin/<headRef>` or reuse the local branch), and record
    `pull_request`, `branch`, `base_branch` and `base_commit = git merge-base origin/<headRef> upstream/<base>`.
    `crewline branch` then runs with `--allow <sha>` for **each commit already in the PR** (the user asked for them by naming the PR)
-   and the new commits carry this task's story key. GITHUB_PLANNING creates no new PR. COMMIT_PR -> PR_CLOSEOUT pushes to
+   and the new commits carry this task's tracker key. GITHUB_PLANNING creates no new PR. COMMIT_PR -> PR_CLOSEOUT pushes to
    the same branch (approval `push_and_pr`, scope `push to existing PR #N`; never force-push) and updates the PR description
    to cover the added change. If the PR is closed/merged, belongs to someone else's fork, or its base is not upstream, stop and
    ask. Tell the user once that mixing unrelated changes in one PR can slow review; follow their choice.
