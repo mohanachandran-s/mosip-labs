@@ -263,3 +263,23 @@ scenarios:
     name: A session inside the task worktree
     expected: the worktree is active, finds its task and the module context without copying it, hooks judge the folder being changed, nothing a git add -A could leak; a plain clone stays inactive
     automated_by: test_task_session.py::test_task_worktree_is_a_full_crewline_session, ::test_worktree_needs_the_base_branch_approval_and_keeps_user_settings, ::test_a_plain_clone_without_crewline_stays_inactive
+  - id: EV-66
+    name: A move is prepared, not tried
+    expected: manifest --next lists every legal move with each precondition; status rules out a fourth repair; record commands refuse an illegal value and write nothing
+    automated_by: test_preflight_and_ci.py::test_next_lists_every_precondition_without_a_rejected_attempt, ::test_next_says_ok_for_what_holds_and_reports_forced_escalation, ::test_status_never_offers_a_fourth_repair, ::test_review_record_refuses_what_the_schema_or_independence_forbid, ::test_approval_and_limitation_records
+  - id: EV-67
+    name: A Python-only change is measured with no flags
+    expected: diff-coverage finds the changed source from the diff and matches coverage.xml; 0 lines measured is never a silent pass; requirement-fit counts Python tests
+    automated_by: test_preflight_and_ci.py::test_diff_coverage_measures_python_with_no_flags, ::test_zero_lines_measured_is_never_a_silent_pass, ::test_requirement_fit_sees_python_tests, ::test_python_paths_count_as_tests
+  - id: EV-68
+    name: Untrusted input is handled before code
+    expected: an AC that reads like parsing untrusted input gets the question asked; true needs limit ACs and a security-engineer threat review before test design
+    automated_by: test_preflight_and_ci.py::test_untrusted_input_needs_limit_acs, ::test_a_plain_api_ac_is_not_asked_about_untrusted_input, ::test_threat_review_comes_before_test_design
+  - id: EV-69
+    name: Standards for a repository that has none
+    expected: the gate says only debug leftovers were checked; onboarding drafts a checker proposal; changed-lines mode blocks only violations on touched lines and an unmappable log still blocks
+    automated_by: test_preflight_and_ci.py::test_no_checker_says_so_and_onboarding_proposes_one, ::test_changed_lines_mode_blocks_only_new_violations, ::test_changed_lines_mode_from_module_yaml
+  - id: EV-70
+    name: Nothing ships silently
+    expected: FINAL_REPORT refused with a waived finding that has no follow-up, or a unit suite no CI workflow runs, unless a person accepted it
+    automated_by: test_preflight_and_ci.py::test_waived_findings_need_a_follow_up_before_final_report, ::test_a_suite_no_ci_runs_is_refused_unless_accepted, ::test_system_suite_outside_ci_warns_and_a_task_with_no_code_is_not_asked

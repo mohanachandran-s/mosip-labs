@@ -36,6 +36,9 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `coverage/AGENTS.
 4. Phrase each ambiguity as one focused question whose answer changes an expected result.
 5. Record non-functional requirements the story implies (performance budget, audit, PII, backward compatibility) as ACs
    with `nfr: true`, or as questions when unstated.
+5b. Answer `requirements.untrusted_input`: does the change parse input it does not control (QR, CBOR, files, uploads, ...)? If true,
+   write `nfr: true` ACs that state the maximum input size, nesting depth, memory and time limits and the error behaviour past each,
+   tagged in `resource_limits` (REQ-005), so the acceptance tests cover them.
 6. Number ACs stably (AC-1, AC-2 ...). Traceability (`crewline trace`) links each AC to `code_refs` and `test_ids` later.
 7. Each AC states actor + observable outcome (status, field, error code, persisted state) in enough words that
    `crewline requirement-clarity` PASSes. Phrases like "should work", "as expected", "TBD", "etc." fail REQ-002.

@@ -8,8 +8,13 @@ production diff. `IMPLEMENTATION_REVIEW` is refused until the gate PASSes.
   STD-001  a checker exists (spotless / checkstyle / eslint / …) but has no matching evidence record   BLOCK
   STD-002  the evidence record for a checker is not PASS (failed, stale, or incomplete)               BLOCK
   STD-003  production diff adds debug leftovers (System.out, console.log, printStackTrace, debugger)  BLOCK
-  STD-004  no runnable checker in the repo (nothing to enforce beyond debug leftovers)                INFO
+  STD-004  no repo standard: only debug leftovers are checked (onboarding proposes a checker)          INFO
   STD-005  a config file exists (checkstyle.xml, .prettierrc, …) but no plugin/script to run it       WARN
+  STD-006  changed-lines mode: the checker reports a violation on a line this change touched          BLOCK
+  STD-007  changed-lines mode: the checker failed only on lines this change did not touch             INFO
+
+Changed-lines mode (`--changed-lines`, or `standards: {mode: changed-lines}` in `.crewline/module.yaml`) lets a repo adopt a
+checker without fixing its history first. The checker's log has to name `path:line`; a log it cannot map still blocks (STD-002).
 
   python -m crewline coding-standards --repo <dir> --base <ref> --manifest <m> [--evidence <record.json>]...
 Evidence paths also come from `implementation.standards_evidence` on the manifest.
@@ -19,6 +24,8 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+
+import yaml
 
 from . import evidence as evidence_mod
 from . import workspace
@@ -45,6 +52,8 @@ TEST_GLOBS = [
     "**/*Test.java", "**/*Tests.java", "**/*IT.java",
     "**/*.spec.ts", "**/*.spec.tsx", "**/*.spec.js",
     "**/*.test.ts", "**/*.test.tsx", "**/*.test.js",
+    "**/tests/**", "**/test/**", "**/test_*.py", "**/*_test.py", "**/conftest.py",
+    "**/*Test.kt", "**/*Tests.kt", "**/*_test.go",
     "**/api-test/**", "**/apitest/**",
 ]
 DEBUG_RX = re.compile(
@@ -131,7 +140,46 @@ def _load_records(paths: list[str]) -> list[tuple[str, dict]]:
     return out
 
 
-def run(repo: str, base: str, manifest_path: str, evidence_paths: list[str] | None = None) -> Result:
+LOCATION = re.compile(r"((?:[A-Za-z]:)?[\w./\\-]+\.\w{1,6})[:(\[]+(\d+)")
+
+
+def _changed_mode(root: Path) -> bool:
+    ctx = workspace.context_dir(root)
+    try:
+        mod = yaml.safe_load((ctx / "module.yaml").read_text(encoding="utf-8")) if ctx else None
+    except (OSError, yaml.YAMLError):
+        return False
+    return ((mod or {}).get("standards") or {}).get("mode") == "changed-lines" if isinstance(mod, dict) else False
+
+
+def _on_changed_lines(record: str, root: Path, base: str, changed: dict[str, str]) -> tuple[list[str], int] | None:
+    """(violations on lines this change touched, violations elsewhere); None when the log names no path:line."""
+    try:
+        log = Path(json.loads(Path(record).read_text(encoding="utf-8")).get("log", ""))
+        text = log.read_text(encoding="utf-8", errors="replace")
+    except (OSError, ValueError):
+        return None
+    found = LOCATION.findall(text)
+    if not found:
+        return None
+    touched: dict[str, set[int]] = {}
+    for path, kind in changed.items():
+        if kind != "D":
+            touched[path] = {n for n, _ in _added_lines(root, base, path)}
+            if not touched[path] and kind == "A" and (root / path).is_file():
+                touched[path] = set(range(1, len((root / path).read_text(encoding="utf-8", errors="replace").splitlines()) + 1))
+    hits, other = [], 0
+    for where, line in found:
+        norm = where.replace("\\", "/")
+        path = next((p for p in touched if norm == p or norm.endswith("/" + p)), None)
+        if path and int(line) in touched[path]:
+            hits.append(f"{path}:{line}")
+        else:
+            other += 1
+    return sorted(set(hits)), other
+
+
+def run(repo: str, base: str, manifest_path: str, evidence_paths: list[str] | None = None, changed_lines: bool = False) -> Result:
     res = Result("coding-standards", inputs={"repo": repo, "base": base, "manifest": manifest_path})
     try:
         doc = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
@@ -160,8 +208,8 @@ def run(repo: str, base: str, manifest_path: str, evidence_paths: list[str] | No
     records = _load_records(paths)
 
     if not found["tools"]:
-        res.add("STD-004", INFO, "no spotless/checkstyle/eslint/prettier checker in the repo; "
-                "cannot invent a style guide. Debug leftovers in the diff still block.")
+        res.add("STD-004", INFO, "no repo standard; only debug leftovers checked. Crewline does not invent a style guide: "
+                "onboarding proposes a checker for the module owner (.crewline/development/standards-proposal.md)")
         if found["config_files"]:
             res.add("STD-005", WARN, "style config present but no runnable plugin/script: "
                     + ", ".join(found["config_files"]),
@@ -175,6 +223,17 @@ def run(repo: str, base: str, manifest_path: str, evidence_paths: list[str] | No
                     remediation=f"python -m crewline run --repo {repo} --out <task>/evidence/{tool['id']}.json -- {cmd}")
             continue
         ev = evidence_mod.run(hit, repo)
+        only_exit = {f.rule_id for f in ev.findings if f.severity == BLOCK} == {"EVD-003"}
+        if ev.status != "PASS" and only_exit and (changed_lines or _changed_mode(root)):
+            mapped = _on_changed_lines(hit, root, base, changed)
+            if mapped is not None:
+                hits, other = mapped
+                for where in hits:
+                    res.add("STD-006", BLOCK, f"{tool['id']}: violation on a changed line, {where}", path=where.rsplit(":", 1)[0],
+                            evidence=hit)
+                if not hits:
+                    res.add("STD-007", INFO, f"{tool['id']}: {other} existing violation(s), none on a line this change touched")
+                continue
         if ev.status != "PASS":
             res.add("STD-002", BLOCK, f"{tool['id']}: evidence {hit} is {ev.status} ({ev.summary})",
                     path=hit, evidence=ev.summary)

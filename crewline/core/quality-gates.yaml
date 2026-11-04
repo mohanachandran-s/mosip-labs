@@ -132,7 +132,7 @@ gates:
   diff_coverage:
     state: UNIT_INTEGRATION_TEST
     enforced_by: deterministic
-    commands: ["run tests WITH the coverage agent (no -Djacoco.skip) + jacoco:report via crewline run", "diff-coverage --repo <dir> --base <base_ref> --jacoco <module>/target/site/jacoco --threshold 80"]
+    commands: ["run tests with coverage via crewline run (JaCoCo agent + jacoco:report, pytest --cov --cov-report=xml, Jest/Vitest lcov)", "diff-coverage --repo <dir> --base <base_ref> --jacoco <report or dir> --threshold 80"]
     requires: ["at least 80% of changed executable production lines executed by tests", every changed source file present in a report, report newer than the change]
     note: the threshold is the default; a repository standard (.crewline/development/local-context.md) may raise it. Lowering it needs an attributed gate exception.
 
@@ -280,6 +280,12 @@ gates:
     enforced_by: deterministic
     commands: ["gh pr checks <n> --repo <upstream_repo> (read on each monitor event)"]
     requires: [monitoring on (pr.monitoring), every required check PASS on the PR head SHA, a failing check triaged in FAILURE_TRIAGE (CODE_UNDER_CHANGE -> dev loop, ENVIRONMENT -> re-run, else escalate)]
+
+  ci_coverage:
+    state: PR_CLOSEOUT
+    enforced_by: deterministic
+    commands: ["ci-coverage --manifest <task-manifest.json>"]
+    requires: [every unit or component suite the task ran is in a CI workflow (CIC-001), or an attributed exception with its follow-up (MAN-019); checked on the move to FINAL_REPORT]
 
   pr_comments:
     state: PR_CLOSEOUT

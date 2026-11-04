@@ -26,6 +26,8 @@ RTK is optional.
 
 ## How to run a task
 
+Before offering a choice read `crewline status`; prepare a move with `crewline manifest <m> --next`; write records with `crewline review
+record`, `approval add`, `limitation add`, never by hand. Waivers need a follow-up (MAN-019). Untrusted input needs limit ACs and a threat review before test design.
 New session on a paused task: `crewline resume <id>` (never hand-write a hand-over); after a repair `crewline gates refresh
 --all [--rerun]` (never a per-task gate script). Several open tasks: `crewline task activate --id <id>`. Work inside the task
 worktree: `crewline task worktree --id <id> --base <ref> --branch <name>`, then open the session there.

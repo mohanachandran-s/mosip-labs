@@ -21,7 +21,7 @@ from pathlib import Path
 
 import yaml
 
-from . import (branch, branch_env, change_scope, coding_standards, dco, defect_reports, evidence, manifest, migration,
+from . import (branch, branch_env, change_scope, ci_coverage, coding_standards, dco, defect_reports, evidence, manifest, migration,
                requirement_clarity, requirement_fit, robustness, secrets_scan, test_integrity, traceability)
 from .gitio import changed_files, head
 from .result import BLOCK, INFO, Result
@@ -31,6 +31,7 @@ REPO_LESS = {
     "branch_environment": branch_env.run,
     "defect_reports": defect_reports.run,
     "traceability": traceability.run,
+    "ci_coverage": ci_coverage.run,
 }
 RECORDS = {
     "build": "build*.json",

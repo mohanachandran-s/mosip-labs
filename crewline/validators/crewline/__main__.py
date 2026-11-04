@@ -13,7 +13,7 @@ Development (any repository)
   python -m crewline test-integrity --repo <dir> --base <ref> [--approvals <yaml>] [--strict]
   python -m crewline migration     --repo <dir> --base <ref>
   python -m crewline trace         <task-manifest.json>
-  python -m crewline coding-standards --repo <dir> --base <ref> --manifest <m> [--evidence <record.json>]...
+  python -m crewline coding-standards --repo <dir> --base <ref> --manifest <m> [--evidence <record.json>]... [--changed-lines]
   python -m crewline robustness      --repo <dir> --base <ref> --manifest <m>
   python -m crewline requirement-clarity --manifest <task-manifest.json>
   python -m crewline requirement-fit --repo <dir> --base <ref> --manifest <m>
@@ -22,6 +22,12 @@ Development (any repository)
   python -m crewline adapter-check     --platform cursor|claude|generic --target <workspace> [--sync]
   python -m crewline evals             [--run] [--pack frozen]
   python -m crewline cold-start        # new-machine kit (frozen pack, adapters, synthetic --apply)
+  python -m crewline manifest      <m> --next                   # every legal move, each precondition with its state
+  python -m crewline status        [<id>]                       # state, repair attempts left, legal moves, open approvals
+  python -m crewline review record --review <name> --result <PASS|FINDINGS|WAIVED> --reviewer <ctx> [--id <id>]
+  python -m crewline approval add  --for <action> --approver <person> --reason <r> --scope <s> [--exception --gate <g>] [--follow-up <key>]
+  python -m crewline limitation add --lim <KL-id> [--text <t>] [--ref <file:line>] [--follow-up <key> | --no-follow-up <reason>]
+  python -m crewline ci-coverage   --manifest <m>               # test suites this task ran that no CI workflow runs
   python -m crewline resume        [<id>]                       # generate HANDOVER.md from the manifest; make the task active
   python -m crewline gates refresh [--id <id>] [--state <S> | --all] [--rerun]   # re-run and re-record gates a command decides
   python -m crewline task              list | status --id <id> | resume --id <id> | new --type <type> --id <id>
@@ -71,6 +77,19 @@ def module_profile(module_root: str, profile: str | None) -> str:
     if not path.is_file():
         raise FileNotFoundError(f"{path} not found: onboard the module (module-onboarding) or pass --profile")
     return str(path)
+
+
+def task_arg(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--id", dest="task_id", help="default: the active task"); p.add_argument("--manifest")
+
+
+def _task_manifest(manifest_path: str | None, task_id: str | None) -> str:
+    if manifest_path:
+        return manifest_path
+    if task_id:
+        path = task.tasks_root() / task_id / "task-manifest.json"
+        return str(path) if path.is_file() else ""
+    return str(workspace.active_manifest()[0] or "")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -133,6 +152,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("migration"); repo_base(p)
     p = sub.add_parser("trace"); p.add_argument("manifest")
     p = sub.add_parser("coding-standards"); repo_base(p); p.add_argument("--manifest", required=True)
+    p.add_argument("--changed-lines", action="store_true", help="a checker failure counts only on lines this change touched")
     p.add_argument("--evidence", action="append", default=[], help="crewline run record for a checker (repeatable)")
     p = sub.add_parser("robustness"); repo_base(p); p.add_argument("--manifest", required=True)
     p = sub.add_parser("requirement-clarity"); p.add_argument("--manifest", required=True)
@@ -159,6 +179,25 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--type", dest="task_type", help="for `new`: feature, bug-fix, ...")
     p.add_argument("--out", dest="task_out", help="for export: directory or .zip")
     p.add_argument("--from", dest="task_from", help="for import: directory or .zip")
+    p = sub.add_parser("status", help="state, repair attempts left, legal moves, open approvals")
+    p.add_argument("task_id", nargs="?", help="default: the active task")
+    p = sub.add_parser("review", help="review record: write a review result without hand-editing the manifest")
+    p.add_argument("action", choices=["record"]); task_arg(p)
+    p.add_argument("--review", required=True, help="implementation_review, fresh_context_review or security_review")
+    p.add_argument("--result", required=True, help="PASS, FINDINGS, WAIVED (security_review: NOT_APPLICABLE)")
+    p.add_argument("--reviewer", help="context id of the reviewer")
+    p = sub.add_parser("approval", help="approval add: record what a person decided")
+    p.add_argument("action", choices=["add"]); task_arg(p)
+    p.add_argument("--for", dest="for_action", required=True, help="the action approved, e.g. commit_pr")
+    p.add_argument("--approver", required=True); p.add_argument("--reason", required=True); p.add_argument("--scope", required=True)
+    p.add_argument("--exception", action="store_true", help="a gate exception (with --gate)"); p.add_argument("--gate")
+    p.add_argument("--follow-up"); p.add_argument("--no-follow-up")
+    p = sub.add_parser("limitation", help="limitation add: a known limitation and its follow-up")
+    p.add_argument("action", choices=["add"]); task_arg(p)
+    p.add_argument("--lim", required=True, help="limitation id, e.g. KL-PYSDK-001"); p.add_argument("--text")
+    p.add_argument("--ref", action="append", default=[]); p.add_argument("--follow-up"); p.add_argument("--no-follow-up")
+    p = sub.add_parser("ci-coverage", help="test suites this task ran that no CI workflow runs")
+    p.add_argument("--manifest", required=True)
     p = sub.add_parser("resume", help="write and print the hand-over of a task from its manifest, and make it active")
     p.add_argument("task_id", nargs="?", help="default: the active task")
     p = sub.add_parser("gates", help="gates refresh: re-run and re-record the gates a command decides")
@@ -175,7 +214,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out"); p.add_argument("--force", action="store_true")
     p = sub.add_parser("diff-coverage"); repo_base(p)
     p.add_argument("--jacoco", required=True, help="jacoco.xml or a directory searched for jacoco.xml")
-    p.add_argument("--threshold", type=float, default=80.0); p.add_argument("--include", default="*src/main/java/*.java")
+    p.add_argument("--threshold", type=float, default=80.0); p.add_argument("--include", help="default: every changed source file that is not a test")
     p = sub.add_parser("usage")
     p.add_argument("--manifest", required=True); p.add_argument("--mark", help="start a named step now")
     p.add_argument("--transcript", action="append", default=[]); p.add_argument("--out")
@@ -190,6 +229,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--cwd", help="workspace root for relative write paths")
     p = sub.add_parser("manifest")
     p.add_argument("manifest"); p.add_argument("--to")
+    p.add_argument("--next", action="store_true", help="every legal move and each precondition with its current state")
     p.add_argument("--apply", action="store_true", help="record the transition if every guard passes")
     p.add_argument("--note", default="")
 
@@ -272,7 +312,7 @@ def main(argv: list[str] | None = None) -> int:
         elif a.cmd == "trace":
             res = traceability.run(a.manifest)
         elif a.cmd == "coding-standards":
-            res = coding_standards.run(a.repo, a.base, a.manifest, a.evidence)
+            res = coding_standards.run(a.repo, a.base, a.manifest, a.evidence, a.changed_lines)
         elif a.cmd == "robustness":
             res = robustness.run(a.repo, a.base, a.manifest)
         elif a.cmd == "requirement-clarity":
@@ -294,6 +334,22 @@ def main(argv: list[str] | None = None) -> int:
         elif a.cmd == "task":
             res = task.run(a.action, a.task_id, a.task_type, getattr(a, "task_out", None), getattr(a, "task_from", None),
                            a.task_base, a.task_branch)
+        elif a.cmd in ("status", "review", "approval", "limitation"):
+            from . import records
+            path = _task_manifest(getattr(a, "manifest", None), a.task_id)
+            if not path:
+                res = Result.not_run(a.cmd, "no task manifest: pass --id, or activate a task")
+            elif a.cmd == "status":
+                res = records.status(path)
+            elif a.cmd == "review":
+                res = records.review_record(path, a.review, a.result, a.reviewer)
+            elif a.cmd == "approval":
+                res = records.approval_add(path, a.for_action, a.approver, a.reason, a.scope, a.gate, a.exception, a.follow_up, a.no_follow_up)
+            else:
+                res = records.limitation_add(path, a.lim, a.text, a.ref, a.follow_up, a.no_follow_up)
+        elif a.cmd == "ci-coverage":
+            from . import ci_coverage
+            res = ci_coverage.run(a.manifest)
         elif a.cmd == "resume":
             from . import handover
             res = handover.run(a.task_id)
@@ -324,7 +380,9 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 res = Result.not_run("guard", "pass --shell, --write or --read")
         else:
-            if a.to and a.apply:
+            if a.next:
+                res = manifest.next_report(a.manifest)
+            elif a.to and a.apply:
                 res = manifest.apply(a.manifest, a.to, a.note)
             else:
                 res = manifest.transition(a.manifest, a.to) if a.to else manifest.check(a.manifest)

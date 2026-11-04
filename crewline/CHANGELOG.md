@@ -9,6 +9,25 @@ because Claude Code updates an installed plugin only when that version changes. 
   changed for them.
 - **MAJOR**: a change that can break a task in progress (state machine, manifest schema). Finish or restart open tasks.
 
+## 0.7.4
+The rest of what PP-PYSDK found. Stricter rules for tasks in progress: REQ-005/006, PKT-005, MAN-019, CIC-001; DCV-005 can block.
+Closes mosip/mosip-labs#117, #118, #119, #120, #121, #122.
+- **#117:** `crewline manifest <m> --next` lists every legal move with each precondition and its state. `crewline status` shows state, repair
+  attempts used and left, legal moves, open approvals; the orchestrator reads it before offering a choice. `crewline review record`, `approval add`
+  and `limitation add` validate first and write nothing when refused. The repair cap and WAIVED rules are unchanged, now stated up front.
+- **#118:** `diff-coverage` finds changed source from the diff (Java, Kotlin, Python, JS/TS, Go; not tests), with no default Java filter, and matches
+  coverage.py paths relative to their source root. 0 lines measured is never a silent pass (DCV-005). Python, Kotlin and Go test paths count as tests (RFT-005).
+  A mixed diff now needs coverage for every language in it, or `--include` to narrow it.
+- **#119:** `requirements.untrusted_input`: an AC that reads like parsing untrusted input gets the question asked (REQ-006). True needs ACs tagged
+  `resource_limits` for input size, nesting depth, memory, time and error behaviour (REQ-005), and `packets/THREAT_REVIEW.md` by the security-engineer before
+  test design (PKT-005). The optional parallel reviews are not built.
+- **#120:** STD-004 says plainly that only debug leftovers were checked. `discover` drafts `standards-proposal.md` when a repository has no checker
+  (DSC-010), for the module owner. `--changed-lines` or `standards: {mode: changed-lines}` blocks only violations on lines the change touched (STD-006/007); a log with no
+  `path:line` still blocks. The optional org-wide profile is not built.
+- **#121:** by FINAL_REPORT every known limitation and gate exception links a follow-up or an accepted reason (MAN-019); token_budget exceptions are exempt. `crewline ci-coverage` compares the suites in `crewline run` records with `.github/workflows` (CIC-001 unit or component BLOCK, CIC-002 system WARN), on the move to FINAL_REPORT, accepted only through a human exception on gate `ci_coverage`. It reads workflow files rather than PR check names, because a check name does not say what ran, so it is a heuristic: tool family and folder in one workflow file.
+- **#122:** [docs/how-crewline-works.md](docs/how-crewline-works.md), linked from the top of the README.
+- Eval EV-66..70.
+
 ## 0.7.3
 Found running PP-PYSDK on 0.7.0: 62M tokens, a hand-written hand-over, task-specific gate scripts, an active task that switched when
 a file changed, and a session that had to sit in one worktree while editing another. Closes mosip/mosip-labs#114, #115, #116.

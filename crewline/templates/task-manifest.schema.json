@@ -221,6 +221,19 @@
                   "type": "string"
                 },
                 "description": "TestRig uniqueIdentifier / UI rig scenario proving the AC end to end (TRC-008/009)"
+              },
+              "resource_limits": {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "input_size",
+                    "nesting_depth",
+                    "memory",
+                    "time",
+                    "error_behaviour"
+                  ]
+                },
+                "description": "which limit this non-functional AC states (REQ-005)"
               }
             }
           }
@@ -228,6 +241,10 @@
         "open_ambiguities": {
           "type": "integer",
           "minimum": 0
+        },
+        "untrusted_input": {
+          "type": "boolean",
+          "description": "the change parses input it does not control (QR, CBOR, files, uploads, ...): needs resource-limit ACs (REQ-005) and a threat review before test design (PKT-005)"
         }
       }
     },
@@ -1054,6 +1071,39 @@
       "type": "string",
       "pattern": "^\\d+\\.\\d+\\.\\d+$",
       "description": "Crewline version the task started on (recorded at INTAKE: `crewline version`); MAN-016 warns when the installed Crewline differs"
+    },
+    "known_limitations": {
+      "type": "array",
+      "description": "findings the task ships with; each links a follow-up by FINAL_REPORT (MAN-019). Write with `crewline limitation add`",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "text"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "follow_up": {
+            "type": "string",
+            "description": "ticket key or URL, or the follow-up task id"
+          },
+          "no_follow_up": {
+            "type": "string",
+            "description": "why none is needed, as the user accepted it"
+          }
+        }
+      }
     }
   },
   "$defs": {
@@ -1095,6 +1145,14 @@
         },
         "consumed_by": {
           "type": "string"
+        },
+        "follow_up": {
+          "type": "string",
+          "description": "for a gate exception: the ticket or task that closes what was waived (MAN-019)"
+        },
+        "no_follow_up": {
+          "type": "string",
+          "description": "for a gate exception: why none is needed, as the user accepted it"
         }
       }
     }

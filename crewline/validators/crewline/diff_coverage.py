@@ -1,7 +1,8 @@
 """Diff coverage: are the production lines this change added or modified actually executed by the tests?
 
   python -m crewline diff-coverage --repo <dir> --base <ref> --jacoco <jacoco.xml | lcov.info | dir> [--threshold 80] [--include <glob>]
-  JS/TS: --jacoco <project>/coverage --include '*<project>/src/*'   (Jest/Vitest lcov.info)
+  Default: every changed source file that is not a test (Java, Kotlin, Python, JS/TS, Go). --include narrows it.
+  Python: coverage.xml from `pytest --cov --cov-report=xml`. JS/TS: coverage/lcov.info (Jest/Vitest).
 
 Reads JaCoCo XML reports (`target/site/jacoco/jacoco.xml`) and lcov reports (`coverage/lcov.info`), searched recursively
 under a directory, and the change
@@ -12,6 +13,8 @@ it is covered when at least one instruction ran (ci > 0).
   DCV-002  a changed source file has executable lines but is not in any report (not instrumented / tests not run)  BLOCK
   DCV-003  uncovered changed lines (listed per file)                         INFO
   DCV-004  report older than the newest changed source file (stale run)      BLOCK
+  DCV-005  nothing measured: 0 lines is never a silent pass. --include missed the changed source BLOCK; no source changed or
+           no changed line is executable WARN
 
 Untested changed lines are the usual hiding place for a fix that only works on the happy path.
 """
@@ -22,17 +25,24 @@ import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from .coding_standards import is_test_path
 from .gitio import changed_files, git, top
-from .result import BLOCK, INFO, Result
+from .result import BLOCK, INFO, WARN, Result
 
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
-DEFAULT_INCLUDE = "*src/main/java/*.java"
+SOURCE_SUFFIXES = {".java", ".kt", ".py", ".js", ".jsx", ".mjs", ".ts", ".tsx", ".go"}
+NOT_PRODUCTION = re.compile(r"(^|/)setup\.py$|\.config\.(js|mjs|cjs|ts)$|\.d\.ts$")
 
 
-def changed_lines(repo: str, base: str, include: str) -> dict[str, set[int]]:
+def is_source(path: str) -> bool:
+    return Path(path).suffix in SOURCE_SUFFIXES and not is_test_path(path) and not NOT_PRODUCTION.search(path)
+
+
+def changed_lines(repo: str, base: str, include: str | None = None) -> dict[str, set[int]]:
     root = top(repo)
     out: dict[str, set[int]] = {}
-    files = {p: k for p, k in changed_files(repo, base).items() if k != "D" and fnmatch.fnmatchcase(p, include)}
+    files = {p: k for p, k in changed_files(repo, base).items()
+             if k != "D" and (fnmatch.fnmatchcase(p, include) if include else is_source(p))}
     for path, kind in files.items():
         if kind == "A" and not git(root, "ls-files", "--", path).strip():      # untracked new file: every line
             n = len((root / path).read_text(encoding="utf-8", errors="replace").splitlines())
@@ -109,11 +119,18 @@ def _load_cobertura(r: Path, cov: dict[str, dict[int, bool]]) -> None:
 
 
 def _report_key(path: str) -> str | None:
-    m = re.search(r"src/main/java/(.+\.java)$", path)
+    m = re.search(r"src/main/(?:java|kotlin)/(.+\.(?:java|kt))$", path)
     return m.group(1) if m else None
 
 
-def run(repo: str, base: str, jacoco: str, threshold: float = 80.0, include: str = DEFAULT_INCLUDE) -> Result:
+def _cobertura(cov: dict[str, dict[int, bool]], path: str) -> dict[int, bool] | None:
+    """coverage.py paths are relative to its source root, so `python/src/pkg/a.py` is reported as `pkg/a.py`."""
+    norm = path.replace("\\", "/").lower()
+    hits = [k for k in cov if k.startswith("cov:") and (norm == k[4:] or norm.endswith("/" + k[4:]))]
+    return cov[max(hits, key=len)] if hits else None
+
+
+def run(repo: str, base: str, jacoco: str, threshold: float = 80.0, include: str | None = None) -> Result:
     res = Result("diff-coverage", inputs={"repo": repo, "base": base, "jacoco": jacoco, "threshold": threshold})
     try:
         diff = changed_lines(repo, base, include)
@@ -121,7 +138,7 @@ def run(repo: str, base: str, jacoco: str, threshold: float = 80.0, include: str
     except (RuntimeError, OSError, ET.ParseError) as e:
         return Result.not_run("diff-coverage", str(e))
     if not cov:
-        return Result.not_run("diff-coverage", f"no jacoco.xml under {jacoco} (run tests with the JaCoCo agent + jacoco:report)")
+        return Result.not_run("diff-coverage", f"no jacoco.xml, lcov.info or coverage.xml under {jacoco} (run the tests with coverage)")
     root = top(repo)
     total = covered = 0
     per_file = {}
@@ -134,10 +151,10 @@ def run(repo: str, base: str, jacoco: str, threshold: float = 80.0, include: str
         if report is None:
             report = cov.get("lcov:" + src.resolve().as_posix().lower())
         if report is None:
-            report = cov.get("cov:" + path.replace("\\", "/").lower())
+            report = _cobertura(cov, path)
         if report is None:
             if lines:
-                res.add("DCV-002", BLOCK, f"{path}: not in any JaCoCo report (module tests not run with coverage?)", path=path)
+                res.add("DCV-002", BLOCK, f"{path}: not in any coverage report (tests not run with coverage?)", path=path)
             continue
         execl = sorted(l for l in lines if l in report)
         hit = [l for l in execl if report[l]]
@@ -149,9 +166,20 @@ def run(repo: str, base: str, jacoco: str, threshold: float = 80.0, include: str
             res.add("DCV-003", INFO, f"uncovered changed lines {miss}", path=path)
     pct = 100.0 * covered / total if total else 100.0
     res.inputs.update(changed_executable_lines=total, covered=covered, diff_coverage=round(pct, 1), files=per_file)
+    if not diff:
+        missed = sorted(p for p, k in changed_files(repo, base).items() if k != "D" and is_source(p))
+        if include and missed:
+            res.add("DCV-005", BLOCK, f"--include {include} matches none of the {len(missed)} changed source files "
+                                      f"({', '.join(missed[:3])}): 0 lines measured is not a pass",
+                    remediation="drop --include; the changed source files are found from the diff")
+        else:
+            res.add("DCV-005", WARN, "no production source changed: nothing to measure")
+    elif not total and per_file:
+        res.add("DCV-005", WARN, "no changed line is executable in the coverage report: nothing measured")
     if total and pct < threshold:
         res.add("DCV-001", BLOCK, f"diff coverage {pct:.1f}% < {threshold:.0f}% ({covered}/{total} changed executable lines)",
                 remediation="add tests that execute the uncovered lines (DCV-003), or record an attributed exception")
     res.finish()
-    res.summary = f"diff coverage {pct:.1f}% ({covered}/{total} changed executable lines); " + res.summary
+    measured = f"{pct:.1f}%" if total else "nothing measured"
+    res.summary = f"diff coverage {measured} ({covered}/{total} changed executable lines); " + res.summary
     return res

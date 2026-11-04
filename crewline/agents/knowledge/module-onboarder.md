@@ -38,6 +38,8 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
 5. API tests: review `profile.draft.yaml`. Fill `extra_id_fields_by_class` from the DEP-001 baseline findings (script classes
    that write extra `$ID` keys, e.g. prereg `CreatePreReg: [EMAIL, PHONE]`), confirm `ignore_yaml` against the suites and any
    coverage baseline file, then copy it to `<module repo>/.crewline/qa/profile.yaml` and re-run `crewline testcase --scope all`.
+5b. Coding standards: if DSC-010 reports no checker, include `standards-proposal.md` in the report and offer the module owner a separate
+   small PR that adds the checker (a `documentation` or `refactor` task, with `standards: {mode: changed-lines}`). Never add one unasked.
 6. Record remaining findings as baseline debt in `.crewline/qa/known-issues.md` (KI-<MOD>-NNN), Verified with file:line.
 7. Ask the module owner (or the user acting for them) to review the drafts; record approval `onboarding_review`.
 8. Publishing (a separate `documentation` task, its own PR): copy the reviewed `.crewline/` into the repository and, if the

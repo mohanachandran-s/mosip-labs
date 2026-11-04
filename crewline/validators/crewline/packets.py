@@ -229,6 +229,20 @@ def _require_specialist_packet(manifest_path: str, state: str, doc: dict, res: R
                 remediation=f"delegate {state} to its agent; it writes the packet")
 
 
+def require_threat_review(manifest_path: str, doc: dict, res: Result, to_state: str) -> None:
+    """PKT-005: `packets/THREAT_REVIEW.md` by the security-engineer, before tests and code for untrusted input."""
+    if _has_exception(doc, "threat_review"):
+        return
+    path = packet_path(manifest_path, "THREAT_REVIEW")
+    text = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+    agent = re.search(r"(?im)^\s*agent:\s*(\S+)", text)
+    name = re.sub(r"^(crewline[-:])?([\w-]+:)?", "", agent.group(1).strip().lower()) if agent else ""
+    if name != "security-engineer" or not re.search(r"(?im)^\s*context_id:\s*\S", text):
+        res.add("PKT-005", BLOCK, f"{to_state}: the change parses untrusted input (requirements.untrusted_input): "
+                "packets/THREAT_REVIEW.md by the security-engineer (`agent:`, `context_id:`) comes before test design",
+                path=str(path), remediation="delegate the threat review (agents/security/security-engineer.md); limits it finds become ACs")
+
+
 def enforce(manifest_path: str, to_state: str, doc: dict, res: Result) -> None:
     src = doc.get("current_state")
     if src == "DESIGN":

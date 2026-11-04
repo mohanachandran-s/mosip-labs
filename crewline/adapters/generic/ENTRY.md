@@ -25,6 +25,8 @@ On every task:
    dependency-upgrade, database-migration, incident, release, test-automation, module-onboarding,
    documentation) and its risk tier. Create the task manifest
    (`{{CORE}}/templates/task-manifest.schema.json`) in the task workspace `<clone>/.crewline-work/tasks/<id>/` (excluded from git through .git/info/exclude; never committed).
+   Before offering a choice: `python -m crewline status`. Prepare a move: `python -m crewline manifest <m> --next`. Write records with
+   `review record`, `approval add`, `limitation add`, not by hand. Waivers need a follow-up (MAN-019).
    Paused task: `python -m crewline resume <id>`; after a repair `python -m crewline gates refresh --all [--rerun]`. Several
    open tasks: `python -m crewline task activate --id <id>`. Never hand-write a hand-over or a gate script.
    **Tracker ticket (INPUT_VALIDATION, every task):** find the GitHub issue / Jira item (request, branch, commits,

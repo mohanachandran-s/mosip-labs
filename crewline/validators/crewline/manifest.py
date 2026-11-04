@@ -22,6 +22,8 @@
   MAN-018  subtasks under the ticket: past GITHUB_PLANNING without one subtask per kind the template lists (unless
            waived); a subtask key that does not fit the system; created_by_crewline without create_tracker_subtasks;
            a posted closure comment without tracker_comment; DONE while a subtask closure is neither posted nor declined
+  MAN-019  reaching FINAL_REPORT with a waived finding (known limitation, gate exception) that has no follow-up link or
+           accepted reason; a test suite no CI workflow runs (ci-coverage CIC-001) is refused on the same move
   TRN-001  transition is not an edge of the (template-projected) state machine
   TRN-002  entry, edge or exit guard not satisfied
   TRN-003  forced escalation: a repair cap reached, or application/security/specification issue
@@ -35,7 +37,7 @@ from pathlib import Path
 
 import yaml
 
-from .result import BLOCK, WARN, Result
+from .result import BLOCK, INFO, WARN, Result
 
 CORE = Path(__file__).resolve().parents[2]
 WORKFLOW = CORE / "core" / "workflow.yaml"
@@ -313,6 +315,89 @@ def pr_body_problem(doc: dict, body: str | None) -> str:
     return f"PR body does not link the ticket: add `Closes {t.get('url') or t['key']}` (or Refs)"
 
 
+def waivers_without_follow_up(doc: dict) -> list[str]:
+    """token_budget is a decision to keep spending, not a finding that ships: nothing to follow up."""
+    out = [k.get("id", "?") for k in doc.get("known_limitations") or [] if not (k.get("follow_up") or k.get("no_follow_up"))]
+    for rec in (doc.get("exceptions") or []) + [a for a in doc.get("approvals", []) if a.get("action") == "gate_exception"]:
+        if rec.get("gate") != "token_budget" and not (rec.get("follow_up") or rec.get("no_follow_up")):
+            out.append(f"exception on {rec.get('gate') or rec.get('action', '?')}")
+    return out
+
+
+def _before_final_report(ctx: Ctx, manifest_path: str, to_state: str, res: Result) -> None:
+    if to_state not in ctx.wf["states"] or ctx.idx(to_state) < ctx.idx("FINAL_REPORT"):
+        return
+    for item in waivers_without_follow_up(ctx.doc):
+        res.add("MAN-019", BLOCK, f"{item} has no follow-up: link a ticket or task (`crewline limitation add --id <id> --follow-up "
+                                  "<key>`; a new ticket on approval create_tracker_item), or record no_follow_up with the reason the user accepted")
+    if to_state == "FINAL_REPORT" and "IMPLEMENTATION" in ctx.path:
+        from . import ci_coverage
+        for f in ci_coverage.run(manifest_path).findings:
+            if f.severity == BLOCK and not f.approved_by:
+                res.add(f.rule_id, BLOCK, f.message, remediation=f.remediation)
+
+
+def _threat_review(ctx: Ctx, manifest_path: str, to_state: str, res: Result) -> None:
+    """Untrusted input: a security-engineer threat review before tests and code exist, not after the repair cap."""
+    if not (ctx.doc.get("requirements") or {}).get("untrusted_input") or to_state not in ctx.wf["states"]:
+        return
+    first = next((s for s in ("TESTCASE_DESIGN", "IMPLEMENTATION_PLAN", "IMPLEMENTATION") if s in ctx.path), None)
+    if first and ctx.idx(to_state) >= ctx.idx(first):
+        from . import packets
+        packets.require_threat_review(manifest_path, ctx.doc, res, to_state)
+
+
+def _guard_text(g: dict) -> str:
+    if "all_of" in g:
+        return " and ".join(_guard_text(x) for x in g["all_of"])
+    if "any_of" in g:
+        return "one of (" + " | ".join(_guard_text(x) for x in g["any_of"]) + ")"
+    if "approval" in g:
+        return f"approval {g['approval']}"
+    name = f"gate {g['gate']}" if "gate" in g else g.get("path", "?")
+    return " ".join(f"{name} {op} {val!r}" for op, val in g.items() if op not in ("gate", "path"))
+
+
+def next_report(manifest_path: str) -> Result:
+    """`--next`: every legal move and every precondition with its current state, so a move is prepared, not tried."""
+    res = Result("manifest-next", inputs={"manifest": manifest_path})
+    doc = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    ctx = Ctx(doc)
+    src = doc.get("current_state")
+    base = check(manifest_path)
+    known = {(f.rule_id, f.message) for f in base.findings}
+    for f in base.findings:
+        if f.severity == BLOCK and not f.approved_by:
+            res.add("NXT-002", WARN, f"the manifest itself, fix first: {f.rule_id} {f.message}")
+    waiting = src in ("WAITING_FOR_USER", "S_ESCALATE")
+    moves = ([doc["resume_state"]] if doc.get("resume_state") else []) if waiting else ctx.next_states(src or "")
+    if not waiting:
+        forced = [g for g in ctx.wf.get("forced_escalation", {}).get(src, []) if ctx.holds(g)[0]]
+        if forced:
+            res.add("NXT-003", WARN, f"forced escalation in {src}: only S_ESCALATE is legal ({_guard_text(forced[0])})")
+            moves = []
+    from . import packets
+    ready = []
+    for to in moves:
+        guards = ctx.entry_guards(to) if waiting else _guards_for(ctx, src, to)
+        lines = [f"{'ok ' if ctx.holds(g)[0] else 'NOT'} {_guard_text(g)}" for g in guards]
+        if ctx.wf.get("tracker_guard") and ctx.idx(to) > ctx.idx(ctx.wf.get("tracker_guard_after", "INPUT_VALIDATION")):
+            lines.append(f"{'ok ' if ctx.holds(ctx.wf['tracker_guard'])[0] else 'NOT'} tracker ticket or waiver")
+        need = packets.PACKET_FOR.get(to)
+        if need:
+            lines.append(f"{'ok ' if packets.packet_path(manifest_path, need).is_file() else 'NOT'} packets/{need}.md")
+        t = transition(manifest_path, to)
+        fresh = [f for f in t.findings if f.severity == BLOCK and not f.approved_by and (f.rule_id, f.message) not in known]
+        lines += [f"NOT {f.rule_id}: {f.message}" for f in fresh if f.rule_id != "TRN-002" and not f.message.startswith("no tracker")]
+        verdict = "READY" if not fresh else "not ready"
+        if not fresh:
+            ready.append(to)
+        res.add("NXT-001", INFO, f"{src} -> {to}: {verdict}" + "".join(f"\n      {x}" for x in lines))
+    res.add("NXT-004", INFO, "always legal: WAITING_FOR_USER (needs resume_state), S_ESCALATE; ready now: " + (", ".join(ready) or "none"))
+    res.inputs["ready"] = ready
+    return res.finish()
+
+
 def _tracker_guard(ctx: Ctx, src: str | None, to_state: str, res: Result) -> None:
     """No design or code without a ticket: every move into a state after `tracker_guard_after` (any template)."""
     guard, after = ctx.wf.get("tracker_guard"), ctx.wf.get("tracker_guard_after", "INPUT_VALIDATION")
@@ -448,6 +533,8 @@ def transition(manifest_path: str, to_state: str) -> Result:
                     remediation="produce templates/escalation-report.md and move to S_ESCALATE")
     _tracker_guard(ctx, src, to_state, res)
     _subtask_guard(ctx, src, to_state, res)
+    _before_final_report(ctx, manifest_path, to_state, res)
+    _threat_review(ctx, manifest_path, to_state, res)
     if src == "PR_CLOSEOUT" and ctx.idx(to_state) > ctx.idx(src):          # the PR as opened carries the key
         problem = pr_title_problem(doc, (doc.get("pr") or {}).get("title"))
         if problem:

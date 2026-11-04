@@ -1,5 +1,7 @@
 # Crewline
 
+**New here, or showing this to someone?** Read the one page: [How Crewline works](docs/how-crewline-works.md).
+
 *A full engineering crew, one line of work.*
 
 One controlled, evidence-backed engineering workflow for MOSIP across the whole SDLC: requirements, design,
@@ -15,7 +17,7 @@ commit/push, so a chat cannot pass for a done SDLC. [Why Crewline on Cursor or C
 
 | | |
 |---|---|
-| Version | `0.7.3` (see `VERSION`) |
+| Version | `0.7.4` (see `VERSION`) |
 | Design | `../AI_Engineering_Agent_Full_SDLC_Implementation_Blueprint_v2.1.html` (authoritative) and `../AI_Engineering_Agent_Full_SDLC_Updated_Plan_v1.3.html` |
 | Lineage | Copied from the SDET Architect Assistant 0.2.0. Its proven workflow is the `test-automation` task type and the `agents/qa/` specialty |
 | Pilots | **PILOT-001** (test automation): [mosip/pre-registration#1088](https://github.com/mosip/pre-registration/pull/1088) · **PILOT-002** (bug fix MOSIP-38854): [mosip/pre-registration#1089](https://github.com/mosip/pre-registration/pull/1089) |
@@ -578,6 +580,8 @@ flowchart TB
 - **No PR with an open defect:** the PR is refused while a defect caused by the change is open, or while a pre-existing one hasn't been raised (MAN-014).
 - **No design or code without a ticket:** nothing moves past INPUT_VALIDATION, in any task type, until a GitHub issue or Jira item is linked and the user confirmed it, Crewline created one on the user's approval (`create_tracker_item`), or the user waived it with a reason (MAN-017, `tracker_guard`). Tasks already past INPUT_VALIDATION are caught at their next move. DONE needs the closure comment on the ticket posted on approval (`tracker_comment`) or declined.
 - **Subtasks under the ticket:** past GITHUB_PLANNING, one subtask per kind the template lists (default testcase, implementation, testing, review, pr; GitHub sub-issue or Jira sub-task), linked or created on approval `create_tracker_subtasks`, or waived by the user (MAN-018). Each gets a closure comment (posted on approval or declined) before DONE.
+- **Waivers get a follow-up:** by FINAL_REPORT every known limitation and gate exception links a ticket or task, or a reason the user accepted (MAN-019). A test suite no CI workflow runs is refused on the same move unless accepted (`ci-coverage`).
+- **Untrusted input:** a change that parses input it does not control needs ACs for input size, nesting depth, memory, time and error behaviour (REQ-005), and a threat review by the security-engineer before test design (PKT-005).
 - **PR links the ticket:** the title starts with the key and the body links the ticket; the hook refuses `gh pr create` / `gh pr edit --title|--body` otherwise (GRD-009).
 - **Where it can run:** an environment where CI deploys the PR image, or a local stack (the module's docker-compose or a local service run). MOSIP pack: options in `packs/mosip/tools.yaml` `branch_test_env`. Generic pack: the environment named in `test_plan.environment` and the module's own suite.
 
@@ -677,7 +681,7 @@ Run from `validators/`: `python -m crewline [--json] <command> ...`. Exit codes:
 
 | Command | Rules | Checks |
 |---|---|---|
-| `manifest` | MAN-001..018, TRN-001..003 | schema; template projection; guards; both repair caps; human single-use approvals; reviewer independence; risk tier; required gates; linked repos. `--to <STATE> [--apply]` |
+| `manifest` | MAN-001..019, TRN-001..003 | schema; template projection; guards; both repair caps; human single-use approvals; reviewer independence; risk tier; required gates; linked repos. `--to <STATE> [--apply]` |
 | `run` / `evidence` | EVD-001..004 | runs the command and records exit code, commit and worktree digest; rejects stale or incomplete records. `run` also prints a CLIP-002 digest of the log |
 | `clip` | CLIP-001..002 | digest of a log (`--file`) or of a command (`clip -- <cmd>`); cap `clip_max_chars` |
 | `change-scope` | SCP-001..003 | changed files inside `scope.approved_paths`; CI/build/deploy/config files always need `scope_change` |
@@ -703,6 +707,9 @@ Run from `validators/`: `python -m crewline [--json] <command> ...`. Exit codes:
 | `usage` | USE-001..009 | token usage per task/stage/step **and** budget stop (`token_budget` gate); packet size; `--apply` stamps a mark (USE-009) |
 | `discover` | DSC-001..009 | module onboarding: reads poms, tests, CI, DB scripts, deploy, guidance, TestRig suites and coding-standard checkers read-only; writes evidence-labelled drafts and a baseline |
 | `guard` | GRD-001..009 | commit/push/PR gated; **GRD-009** PR title not prefixed `<tracker key>: ` or body not linking the ticket; force-push / `--no-verify` / prod always denied; **GRD-007** raw log dump or suite not via `crewline run`; **GRD-008** Read of a dump or file over `read_max_bytes` |
+| `manifest --next` / `status` | NXT-001..004, STS-001 | every legal move and each precondition with its state; repair attempts left, open approvals. Read these before offering the user a choice |
+| `review record` / `approval add` / `limitation add` | REC-001..002 | write records through a command that validates first; never hand-edit the manifest |
+| `ci-coverage` | CIC-001..003 | test suites the task ran that no CI workflow runs (checked on the move to FINAL_REPORT) |
 | `resume` | TSK-009 | `crewline resume [<id>]`: writes `HANDOVER.md` from the manifest (state, open findings, attempts, next commands) and makes the task active; run it instead of writing a hand-over |
 | `gates refresh` | GAT-001..004 | re-runs the gates a command decides and records the result; `--all` after a code change, `--rerun` runs recorded builds and tests again. Review and human gates are never touched |
 | `task activate` / `worktree` | TSK-008, TSK-010 | pin the active task in `.crewline-work/active-task`; create a task worktree a session can run in (ADR-0009) |
