@@ -15,7 +15,7 @@ commit/push, so a chat cannot pass for a done SDLC. [Why Crewline on Cursor or C
 
 | | |
 |---|---|
-| Version | `0.7.2` (see `VERSION`) |
+| Version | `0.7.3` (see `VERSION`) |
 | Design | `../AI_Engineering_Agent_Full_SDLC_Implementation_Blueprint_v2.1.html` (authoritative) and `../AI_Engineering_Agent_Full_SDLC_Updated_Plan_v1.3.html` |
 | Lineage | Copied from the SDET Architect Assistant 0.2.0. Its proven workflow is the `test-automation` task type and the `agents/qa/` specialty |
 | Pilots | **PILOT-001** (test automation): [mosip/pre-registration#1088](https://github.com/mosip/pre-registration/pull/1088) · **PILOT-002** (bug fix MOSIP-38854): [mosip/pre-registration#1089](https://github.com/mosip/pre-registration/pull/1089) |
@@ -610,6 +610,16 @@ flowchart TB
 
 ## 9. Git, PR and review comments
 
+**Which task is active:** the rails judge one task at a time. Most specific first: `CREWLINE_TASK_MANIFEST`, the task whose
+worktree the session runs in, `crewline task activate --id <id>`, then the newest open manifest. `crewline task list` marks it,
+and every guard deny names it. Session scratchpads and temp folders are outside the rails (not a checkout in a temp folder).
+
+**Pausing and resuming:** `crewline resume <id>` in the new session prints everything it needs, and `crewline gates refresh`
+replaces per-task gate scripts. Neither uses the model, which is the main saving on mechanical work. For what remains, the
+specialists running validators and recording evidence can use a cheaper model through the `model:` field of their agent file
+(not set by default, because no evaluation has measured it yet). Token use per state is in `usage.md`, and
+`core/usage-budget.yaml` warns at `warn_ratio` before a state goes over its cap.
+
 **Fork model** (ADR-0003, `crewline branch`):
 1. Ask the **upstream** base branch before any branch exists (approval `base_branch`).
 2. Cut a worktree and branch from that upstream ref exactly; never from local or `origin`.
@@ -693,6 +703,9 @@ Run from `validators/`: `python -m crewline [--json] <command> ...`. Exit codes:
 | `usage` | USE-001..009 | token usage per task/stage/step **and** budget stop (`token_budget` gate); packet size; `--apply` stamps a mark (USE-009) |
 | `discover` | DSC-001..009 | module onboarding: reads poms, tests, CI, DB scripts, deploy, guidance, TestRig suites and coding-standard checkers read-only; writes evidence-labelled drafts and a baseline |
 | `guard` | GRD-001..009 | commit/push/PR gated; **GRD-009** PR title not prefixed `<tracker key>: ` or body not linking the ticket; force-push / `--no-verify` / prod always denied; **GRD-007** raw log dump or suite not via `crewline run`; **GRD-008** Read of a dump or file over `read_max_bytes` |
+| `resume` | TSK-009 | `crewline resume [<id>]`: writes `HANDOVER.md` from the manifest (state, open findings, attempts, next commands) and makes the task active; run it instead of writing a hand-over |
+| `gates refresh` | GAT-001..004 | re-runs the gates a command decides and records the result; `--all` after a code change, `--rerun` runs recorded builds and tests again. Review and human gates are never touched |
+| `task activate` / `worktree` | TSK-008, TSK-010 | pin the active task in `.crewline-work/active-task`; create a task worktree a session can run in (ADR-0009) |
 | `testcase` · `expected-diff` · `scope` · `coverage` | NAME/DEP · EXP-001..009 · SCOPE · COV | API TestRig: IDs, `$ID:` chains, weakened expectations, targeted vs full scope, CoverageCli |
 
 ---

@@ -26,6 +26,10 @@ RTK is optional.
 
 ## How to run a task
 
+New session on a paused task: `crewline resume <id>` (never hand-write a hand-over); after a repair `crewline gates refresh
+--all [--rerun]` (never a per-task gate script). Several open tasks: `crewline task activate --id <id>`. Work inside the task
+worktree: `crewline task worktree --id <id> --base <ref> --branch <name>`, then open the session there.
+
 1. At **INTAKE only**, read `${CLAUDE_PLUGIN_ROOT}/core/principles.md`. Run `crewline pack` and load only that pack's knowledge dirs
    (`packs/<id>/pack.yaml`). MOSIP (default) adds `knowledge/mosip` and `knowledge/frameworks`. Then the target
    repository's `.crewline/development/local-context.md` (staging copy: `<module repo>/.crewline/development/`)

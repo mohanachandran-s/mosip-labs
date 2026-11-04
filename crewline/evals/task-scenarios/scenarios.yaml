@@ -251,3 +251,15 @@ scenarios:
     name: Subtasks under the ticket and their closure comments
     expected: "past GITHUB_PLANNING: one subtask per template kind (default testcase, implementation, testing, review, pr; test-automation: automation) or a human subtasks waiver (MAN-018); creation needs create_tracker_subtasks; DONE needs every subtask closure posted on approval or declined"
     automated_by: test_sdlc.py::test_subtasks_required_past_github_planning, ::test_subtask_record_rules, ::test_done_needs_each_subtask_closed
+  - id: EV-63
+    name: Resume a paused task with one command
+    expected: crewline resume writes HANDOVER.md from the manifest and activates the task; gates refresh records what validators return, stale evidence fails, review gates and NOT_APPLICABLE stay
+    automated_by: test_task_session.py::test_resume_writes_the_handover_in_one_command, ::test_gates_refresh_records_what_the_validators_return, ::test_gates_refresh_sees_stale_evidence_and_rerun_fixes_it, ::test_gates_refresh_keeps_not_applicable_and_reports_missing_repo
+  - id: EV-64
+    name: Explicit active task
+    expected: a change to another manifest does not switch the active task; task list marks it; every deny names it; scratchpad writable, a checkout in a temp folder still guarded
+    automated_by: test_task_session.py::test_active_task_does_not_follow_the_newest_file, ::test_activate_refuses_unknown_and_closed_and_stale_file_falls_back, ::test_every_deny_names_the_active_task, ::test_scratchpad_is_writable_but_a_checkout_in_temp_stays_guarded
+  - id: EV-65
+    name: A session inside the task worktree
+    expected: the worktree is active, finds its task and the module context without copying it, hooks judge the folder being changed, nothing a git add -A could leak; a plain clone stays inactive
+    automated_by: test_task_session.py::test_task_worktree_is_a_full_crewline_session, ::test_worktree_needs_the_base_branch_approval_and_keeps_user_settings, ::test_a_plain_clone_without_crewline_stays_inactive

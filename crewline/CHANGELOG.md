@@ -9,6 +9,27 @@ because Claude Code updates an installed plugin only when that version changes. 
   changed for them.
 - **MAJOR**: a change that can break a task in progress (state machine, manifest schema). Finish or restart open tasks.
 
+## 0.7.3
+Found running PP-PYSDK on 0.7.0: 62M tokens, a hand-written hand-over, task-specific gate scripts, an active task that switched when
+a file changed, and a session that had to sit in one worktree while editing another. Closes mosip/mosip-labs#114, #115, #116.
+- `crewline resume [<id>]` writes `<task>/HANDOVER.md` from the manifest (state, resume_state, what blocks the next move, gates not PASS or
+  PASS on another commit, repair attempts, approvals, token use, next commands) and makes the task active.
+- `crewline gates refresh [--id] [--state S | --all] [--rerun]` re-runs the gates a command decides and records the result with commit and
+  evidence (`evidence/gates/<gate>.json`). Evidence gates re-check their `crewline run` records; `--rerun` runs builds and tests again, never
+  system tests. Review and human gates and a recorded NOT_APPLICABLE are not touched; a gate that needs a report path says what to run.
+  A module with `api-test/` gets `deterministic_validation` NOT_RUN: run `testcase`, `expected-diff` and `coverage` yourself.
+- `crewline task activate --id <id>` / `deactivate` pin the active task in `.crewline-work/active-task`. Order: `CREWLINE_TASK_MANIFEST`, the task
+  whose worktree the session runs in, the file, then the newest open manifest. `task list` marks it; every guard deny names it (hook messages change).
+- GRD-004 no longer applies to session scratchpads and temp folders; a checkout in a temp folder or the session's own folder stays guarded.
+- `crewline task worktree --id <id> [--base <ref> --branch <name>]` creates the task worktree (needs approval `base_branch`) and enables the
+  plugin in it. A session can now run in the task worktree: every hook and validator finds the task and the module's `.crewline/` from the
+  clone and manifest; the context is not copied (ADR-0009). This also fixes SYS-002/003 silently seeing no suites when
+  `scope.repositories[].path` was a task worktree without `.crewline/`.
+- `crewline task` commands find the clone's task list from a main clone with no `.crewline/` at its top.
+- Not built from #114: a cheaper model per role is documented, not set, because no evaluation has measured it. Token use per state and the
+  budget warning already exist (`crewline usage`, `core/usage-budget.yaml`).
+- Eval EV-63..65, ADR-0009.
+
 ## 0.7.2
 Closes the GitHub work-tracking gaps against the SDET plan (section 7.5, 7.9): subtasks, their closure comments, and a PR
 body that links the ticket.

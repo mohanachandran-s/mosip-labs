@@ -92,9 +92,9 @@ def handle_plugin(mode: str, payload: dict) -> dict:
             text += " " + PLUGIN_RAILS.format(tasks=workspace.tasks_root(cwd))
             now = version.current()
             text += f" Crewline {now}."
-            manifest = find_active_manifest(cwd=cwd)
+            manifest, why = workspace.active_manifest(cwd=cwd)
             if manifest:
-                text += f" Active task: {manifest}."
+                text += f" Active task: {manifest} (chosen by {why}; switch with `crewline task activate --id <id>`)."
                 try:
                     started = json.loads(manifest.read_text(encoding="utf-8")).get("crewline_version")
                 except (OSError, ValueError):
@@ -120,7 +120,7 @@ def handle(mode: str, payload: dict, cwd: str | None = None) -> dict:
     if mode == "write":
         return _permission(check_write(_path_from(payload), manifest, _cwd_from(payload)))
     if mode == "read":
-        return _permission(check_read(_path_from(payload), _cwd_from(payload)))
+        return _permission(check_read(_path_from(payload), _cwd_from(payload), manifest))
     return {"permission": "allow"}
 
 

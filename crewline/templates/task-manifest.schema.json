@@ -121,6 +121,13 @@
               "version_link": {
                 "type": "string",
                 "description": "how the primary consumes the dependency change, e.g. 'pom apitest-commons 1.6.0 -> 1.6.1-SNAPSHOT' or 'none: released version already contains it'"
+              },
+              "allow_commits": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "commits the user asked to include (existing PR): crewline gates refresh passes them to `branch --allow`"
               }
             }
           }
@@ -414,6 +421,10 @@
           },
           "checked_at_commit": {
             "type": "string"
+          },
+          "checked_at": {
+            "type": "string",
+            "description": "when the gate was last run (crewline gates refresh)"
           }
         }
       }
@@ -1032,6 +1043,10 @@
         "original_branch": {
           "type": "string",
           "description": "single-checkout mode: branch to restore at the end"
+        },
+        "context_dir": {
+          "type": "string",
+          "description": "the module's .crewline/ folder when the task worktree's base does not carry it (crewline task worktree, ADR-0009)"
         }
       }
     },

@@ -37,7 +37,9 @@ Result fields: `validator, status, summary, findings[rule_id, severity BLOCK|WAR
 | `discover` | DSC-001..009 | Module onboarding: reads poms, tests, CI, DB scripts, deploy, guidance files, API TestRig suites and coding-standard checkers read-only; writes evidence-labelled drafts (`.crewline/development/`, `.crewline/qa/`, profile) and a validator baseline |
 | `diff-coverage` | DCV-001..004 | JaCoCo XML or lcov.info (Jest/Vitest) + git diff: share of changed executable production lines executed by tests (default 80%); unreported files and stale reports block |
 | `guard` | GRD-001..009 | Platform hooks: deny commit/push/PR without an active task and COMMIT_PR gates; always deny force-push, `--no-verify`, hard reset, stash, branch delete, merge, production deploy; deny raw log dumps and unwrapped test suites (GRD-007); deny Read of dumps / files over `read_max_bytes` (GRD-008); `gh pr create` / `gh pr edit --title|--body` without the `<tracker key>: ` title prefix or a body linking the ticket (GRD-009) |
-| `task` | TSK-001..006 | queue + `export`/`import` of manifest, packets and evidence JSON (logs omitted) |
+| `task` | TSK-001..010 | queue + `export`/`import` of manifest, packets and evidence JSON (logs omitted); `activate`/`deactivate` pin the active task; `worktree` creates a task worktree a session can run in (ADR-0009) |
+| `resume` | TSK-009 | writes `<task>/HANDOVER.md` from the manifest and makes the task active |
+| `gates refresh` | GAT-001..004 | re-runs the gates a command decides and records the result (`--state`, `--all`, `--rerun`); review and human gates are never touched |
 
 Per-module rules: `<module repo>/.crewline/qa/profile.yaml`. Every rule there cites the repository evidence it came from.
 

@@ -16,6 +16,8 @@ from pathlib import Path
 
 import yaml
 
+from . import workspace
+
 
 def repo_top(start: Path) -> Path:
     r = subprocess.run(["git", "-C", str(start), "rev-parse", "--show-toplevel"], capture_output=True, text=True, encoding="utf-8")
@@ -27,8 +29,10 @@ def context(project_dir: str | None = None, env: dict | None = None) -> str | No
     if str(env.get("CREWLINE", "")).lower() in ("off", "0", "false", "disabled"):
         return None
     top = repo_top(Path(project_dir or env.get("CLAUDE_PROJECT_DIR") or os.getcwd()))
-    cl = top / ".crewline"
-    if not cl.is_dir():
+    if workspace.module_top(top) is None:
+        return None
+    cl = workspace.context_dir(top)
+    if cl is None:
         return None
     module, roles = top.name, []
     idx = cl / "module.yaml"
@@ -40,11 +44,12 @@ def context(project_dir: str | None = None, env: dict | None = None) -> str | No
         except yaml.YAMLError:
             pass
     roles = roles or sorted(p.name for p in cl.iterdir() if p.is_dir())
-    return (f"Crewline is ACTIVE for this repository (module {module}; context in .crewline/: {', '.join(roles) or 'no role folders'}). "
+    where = ".crewline/" if cl == top / ".crewline" else f"{cl.as_posix()}/ (this is a task worktree; its base has no .crewline/)"
+    return (f"Crewline is ACTIVE for this repository (module {module}; context in {where}: {', '.join(roles) or 'no role folders'}). "
             "For any change to this repository (feature, bug fix, refactor, upgrade, migration, test automation, release, docs), "
             "use the crewline skill workflow: classify the task, create the manifest in .crewline-work/tasks/<task-id>/, ask the "
             "upstream base branch before branching, delegate to the Crewline role agents, run the `crewline` validators, and ask "
-            "the user for every commit, push, PR and bug. Read .crewline/README.md first; the repository's own AGENTS.md / "
+            f"the user for every commit, push, PR and bug. Read {cl.as_posix()}/README.md first; the repository's own AGENTS.md / "
             "CLAUDE.md win where they are more specific. Questions and read-only explanations need no task. The user can turn "
             "Crewline off for this repository in .claude/settings.local.json (\"enabledPlugins\": {\"crewline@mosip-labs\": false}) "
             "or for one session with CREWLINE=off.")

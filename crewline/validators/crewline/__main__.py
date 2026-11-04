@@ -22,7 +22,10 @@ Development (any repository)
   python -m crewline adapter-check     --platform cursor|claude|generic --target <workspace> [--sync]
   python -m crewline evals             [--run] [--pack frozen]
   python -m crewline cold-start        # new-machine kit (frozen pack, adapters, synthetic --apply)
+  python -m crewline resume        [<id>]                       # generate HANDOVER.md from the manifest; make the task active
+  python -m crewline gates refresh [--id <id>] [--state <S> | --all] [--rerun]   # re-run and re-record gates a command decides
   python -m crewline task              list | status --id <id> | resume --id <id> | new --type <type> --id <id>
+                                       | activate --id <id> | deactivate | worktree --id <id> [--base <ref> --branch <name>]
                                        | export --id <id> --out <dir-or-zip> | import --from <dir-or-zip> [--id <id>]
   python -m crewline diff-coverage --repo <dir> --base <ref> --jacoco <jacoco.xml|dir> [--threshold 80]
   python -m crewline usage         --manifest <m> (--mark "<step>" | --transcript <session.jsonl> [--out <json>])
@@ -49,6 +52,7 @@ import argparse
 from pathlib import Path
 import sys
 
+from . import workspace
 from . import (adapter_check, branch, branch_env, change_scope, clip, coding_standards, cold_start, coverage, dco, defect_reports, diff_coverage, discover, evals_run, evidence, expected_diff, guard, manifest, migration, pack, regression, requirement_clarity, requirement_fit, robustness, scope,
                secrets_scan, task, test_integrity, testcase, tools, traceability, usage)
 from .apitestrig import Module, load_profile
@@ -62,7 +66,8 @@ def module_profile(module_root: str, profile: str | None) -> str:
     import subprocess
     top = subprocess.run(["git", "-C", module_root, "rev-parse", "--show-toplevel"], capture_output=True, text=True,
                          encoding="utf-8").stdout.strip()
-    path = Path(top or module_root) / ".crewline" / "qa" / "profile.yaml"
+    ctx = workspace.context_dir(top or module_root) or Path(top or module_root) / ".crewline"
+    path = ctx / "qa" / "profile.yaml"
     if not path.is_file():
         raise FileNotFoundError(f"{path} not found: onboard the module (module-onboarding) or pass --profile")
     return str(path)
@@ -146,11 +151,22 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--id", dest="task_id", required=True)
     p.add_argument("--type", dest="task_type")
     p = sub.add_parser("task")
-    p.add_argument("action", choices=["list", "status", "resume", "new", "start", "export", "import"])
+    p.add_argument("action", choices=["list", "status", "resume", "new", "start", "export", "import",
+                                      "activate", "deactivate", "worktree"])
     p.add_argument("--id", dest="task_id")
+    p.add_argument("--base", dest="task_base", help="for worktree: upstream ref to cut the branch from, e.g. upstream/develop")
+    p.add_argument("--branch", dest="task_branch", help="for worktree: new branch name")
     p.add_argument("--type", dest="task_type", help="for `new`: feature, bug-fix, ...")
     p.add_argument("--out", dest="task_out", help="for export: directory or .zip")
     p.add_argument("--from", dest="task_from", help="for import: directory or .zip")
+    p = sub.add_parser("resume", help="write and print the hand-over of a task from its manifest, and make it active")
+    p.add_argument("task_id", nargs="?", help="default: the active task")
+    p = sub.add_parser("gates", help="gates refresh: re-run and re-record the gates a command decides")
+    p.add_argument("action", choices=["refresh"])
+    p.add_argument("--id", dest="task_id", help="default: the active task"); p.add_argument("--manifest")
+    p.add_argument("--state", help="default: the task's current state")
+    p.add_argument("--all", dest="every", action="store_true", help="every gate a command decides, on any state")
+    p.add_argument("--rerun", action="store_true", help="run the recorded build/test commands again first (not system tests)")
     sub.add_parser("session-start", help="SessionStart hook (prints hook JSON)")
     sub.add_parser("hook", help="platform hook: crewline hook [--claude|--cursor] [--plugin] session|shell|write (stdin JSON)")
     sub.add_parser("cursor-rule", help="print the Crewline rule for a module that uses .cursor/crewline.py")
@@ -276,7 +292,17 @@ def main(argv: list[str] | None = None) -> int:
         elif a.cmd == "start":
             res = task.run("start", a.task_id, a.task_type)
         elif a.cmd == "task":
-            res = task.run(a.action, a.task_id, a.task_type, getattr(a, "task_out", None), getattr(a, "task_from", None))
+            res = task.run(a.action, a.task_id, a.task_type, getattr(a, "task_out", None), getattr(a, "task_from", None),
+                           a.task_base, a.task_branch)
+        elif a.cmd == "resume":
+            from . import handover
+            res = handover.run(a.task_id)
+        elif a.cmd == "gates":
+            from . import gates
+            path = a.manifest or (str(task.tasks_root() / a.task_id / "task-manifest.json") if a.task_id
+                                  else str(workspace.active_manifest()[0] or ""))
+            res = gates.refresh(path, a.state, a.every, a.rerun) if path and Path(path).is_file() \
+                else Result.not_run("gates-refresh", f"no task manifest: {path or 'no active task; pass --id'}")
         elif a.cmd == "discover":
             res = discover.run(a.repo, a.module, a.out, a.force)
         elif a.cmd == "diff-coverage":

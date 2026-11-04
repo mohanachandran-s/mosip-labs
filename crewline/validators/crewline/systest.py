@@ -16,6 +16,7 @@ from pathlib import Path
 
 import yaml
 
+from . import workspace
 from .gitio import head, worktree_digest
 
 CODE_TYPES = {"feature", "bug-fix", "refactor", "dependency-upgrade", "database-migration", "test-automation"}
@@ -40,10 +41,11 @@ def module_stack(doc: dict) -> dict:
         if not str(repo.get("path") or ""):
             continue
         root = Path(str(repo["path"])).resolve()
-        if not (root / ".crewline" / "module.yaml").is_file():
+        ctx = workspace.context_dir(root, doc) if root.is_dir() else None     # a task worktree's base may not carry it
+        if ctx is None or not (ctx / "module.yaml").is_file():
             continue
         try:
-            mod = yaml.safe_load((root / ".crewline" / "module.yaml").read_text(encoding="utf-8")) or {}
+            mod = yaml.safe_load((ctx / "module.yaml").read_text(encoding="utf-8")) or {}
         except (OSError, yaml.YAMLError):
             continue
         stack = mod.get("stack") if isinstance(mod.get("stack"), dict) else {}

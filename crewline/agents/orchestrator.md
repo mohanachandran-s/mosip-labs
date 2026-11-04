@@ -71,8 +71,9 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
     recommendation — not a stamp). Bug-fix IMPLEMENTATION_PLAN needs `evidence/reproduction.json` from
     `crewline run` of the new test on the **base** with exit_code != 0 (REP-001/002).
 3b. **Workspace (one clone per repo):** reuse the clone the user already has (`git -C <clone> rev-parse --show-toplevel`);
-   clone only with approval when none exists. Create the task worktree at `<clone>/.crewline-work/worktrees/<task-id>` and add `.crewline-work/`
-   to `<clone>/.git/info/exclude` (local only, never committed). A base checkout for base-vs-branch runs is
+   clone only with approval when none exists. Create the task worktree with `crewline task worktree --id <task-id> --base <upstream ref> --branch <name>`
+   (at `<clone>/.crewline-work/worktrees/<task-id>`; it excludes `.crewline-work/` locally, enables the plugin there, and records it; ADR-0009), and
+   tell the user to open the session in that folder: it finds its task and the module's context by itself. A base checkout for base-vs-branch runs is
    `<clone>/.crewline-work/worktrees/<task-id>-base` (`--detach`) and is removed as soon as the base run is recorded. Record every worktree in
    `workspace.worktrees` and keep `workspace.open_worktrees` current. At task close (before DONE) remove each one with
    `git worktree remove` (refuse if it has uncommitted changes; ask), then `git worktree prune`; the branch and PR stay, and a
@@ -110,8 +111,11 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
 6d. After installing or upgrading Crewline: `python -m crewline adapter-check --platform <p> --target <workspace> --sync`.
     Drift without --sync is ADP-001. `python -m crewline evals --pack frozen` must PASS. A new machine runs
     `python -m crewline cold-start` before a MOSIP story (`evals/cold-start.md` is the human P5).
-6e. Task queue only: `python -m crewline task list|status --id|resume --id|new --type --id`. Resume prints the
-    next `manifest --to`; it does not walk the crew. Q8 laptop: `evals/q8-local-stack.md`; never treat
+6e. Task queue only: `python -m crewline task list|status --id|resume --id|new --type --id`. `task resume` prints the
+    next `manifest --to`; it does not walk the crew. Several open tasks: `crewline task activate --id <id>` (a session in a
+    task worktree follows that worktree). A new session on a paused task: `crewline resume <id>` writes HANDOVER.md from the
+    manifest; never hand-write one. After a repair: `crewline gates refresh --id <id> --all [--rerun]`; never a per-task gate
+    script, and never set a gate a command decides by hand. Q8 laptop: `evals/q8-local-stack.md`; never treat
     `api-internal.released` as the branch.
 7. SDET is in every code flow (agents/qa/sdet-architect.md, 'Always in code flows'): test plan before code, automation for every user-facing AC, TestRig run on the branch build before the PR, defects tracked to closure. Delegate by state (role map: docs/agents-by-role.md): requirement-analyst -> acceptance-reviewer -> impact-analyst -> solution-architect (+ api-contract-designer / database-engineer when the design touches contracts or data, + ux-designer when it touches a user interface) -> sdet-architect (tests from ACs, before code) -> software-developer -> code-reviewer -> fresh-context-reviewer (new context) -> sdet-architect (system tests) -> security-engineer when risk_tier >= L2 and the diff touches auth/crypto/input handling/dependencies -> release-manager / devops-engineer -> knowledge-curator.
 8. Record authorship: every agent context that writes the change goes into `implementation.authors`; reviewers go into `reviews.reviewers`. A reviewer must not be an author and the two reviews need different contexts (MAN-011).

@@ -21,6 +21,7 @@ import re
 from pathlib import Path
 
 from . import evidence as evidence_mod
+from . import workspace
 from .change_scope import _match
 from .gitio import changed_files, git, top
 from .result import BLOCK, INFO, WARN, Result
@@ -140,7 +141,7 @@ def run(repo: str, base: str, manifest_path: str, evidence_paths: list[str] | No
     except (OSError, ValueError, RuntimeError) as e:
         return Result.not_run("coding-standards", str(e))
 
-    disc = root / ".crewline/development/discovery.json"
+    disc = (workspace.context_dir(root) or root / ".crewline") / "development/discovery.json"
     found = detect(repo)
     if disc.is_file():
         try:
