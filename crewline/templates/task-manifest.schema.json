@@ -945,7 +945,8 @@
           "enum": [
             "branch-deployed-env",
             "local-stack",
-            "post-merge-deferred"
+            "post-merge-deferred",
+            "local-test-rig"
           ]
         },
         "new_cases": {

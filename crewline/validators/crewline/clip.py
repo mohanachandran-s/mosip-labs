@@ -14,7 +14,9 @@ Crewline does not vendor it. Builds and tests already go through `crewline run` 
 """
 from __future__ import annotations
 
+import os
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -71,6 +73,48 @@ def digest_text(text: str, path: str = "", cap: int | None = None) -> str:
     return body[: cap - 16].rstrip() + "\n...truncated"
 
 
+def child_env(overrides: list[str] | None = None) -> dict[str, str]:
+    """The environment for a command Crewline runs: ours, plus `KEY=VALUE` overrides (e.g. JAVA_HOME=<jdk>; its bin/
+    goes first on PATH so `java` and `mvn` use it). MSYS_NO_PATHCONV=1 keeps Git Bash from rewriting `upstream/develop:x`
+    style arguments into Windows paths."""
+    env = dict(os.environ)
+    env.setdefault("MSYS_NO_PATHCONV", "1")
+    for pair in overrides or []:
+        key, sep, value = pair.partition("=")
+        if not sep or not key:
+            raise ValueError(f"--env {pair!r}: expected KEY=VALUE")
+        env[key] = value
+        if key == "JAVA_HOME":
+            env["PATH"] = str(Path(value) / "bin") + os.pathsep + env.get("PATH", "")
+    return env
+
+
+def resolve_argv(command: list[str], env: dict[str, str] | None = None) -> list[str]:
+    """argv with its executable resolved through PATH/PATHEXT: on Windows `mvn` is `mvn.cmd`, which a shell-less
+    subprocess cannot start by itself (WinError 2)."""
+    if not command:
+        return command
+    path = (env or os.environ).get("PATH")
+    exe = shutil.which(command[0], path=path)
+    return [exe, *command[1:]] if exe else list(command)
+
+
+def java_version(env: dict[str, str] | None = None) -> str:
+    """First line of `java -version` for the JDK the command will use ('' when there is no java)."""
+    env = env or dict(os.environ)
+    home = env.get("JAVA_HOME")
+    java = shutil.which("java", path=str(Path(home) / "bin")) if home else None
+    java = java or shutil.which("java", path=env.get("PATH"))
+    if not java:
+        return ""
+    try:
+        p = subprocess.run([java, "-version"], capture_output=True, text=True, env=env, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    out = (p.stderr or p.stdout).strip().splitlines()
+    return out[0] if out else ""
+
+
 def run_command(command: list[str], cap: int | None = None, cwd: str | None = None) -> Result:
     """Run a command, keep stdout on disk, return CLIP-002. Other noisy bash without vendoring RTK."""
     if not command:
@@ -80,7 +124,9 @@ def run_command(command: list[str], cap: int | None = None, cwd: str | None = No
     log = Path(tempfile.mkdtemp(prefix="crewline-clip-")) / "cmd.log"
     try:
         with log.open("w", encoding="utf-8", errors="replace") as fh:
-            code = subprocess.run(command, cwd=cwd, stdout=fh, stderr=subprocess.STDOUT, shell=False).returncode
+            env = child_env()
+            code = subprocess.run(resolve_argv(command, env), cwd=cwd, stdout=fh, stderr=subprocess.STDOUT,
+                                  shell=False, env=env).returncode
     except OSError as e:
         return Result.not_run("clip", f"CLIP-001 could not start {command[0]}: {e}")
     res.inputs.update(exit_code=code, log=str(log))

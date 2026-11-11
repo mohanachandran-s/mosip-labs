@@ -3,10 +3,12 @@
 `run` executes the command itself and writes the record; `evidence` re-checks a record against the repository
 before a gate uses it.
 
-  python -m crewline run --repo <dir> --out <task>/evidence/unit.json [--report <path>] -- mvn -B test
+  python -m crewline run --repo <dir> --out <task>/evidence/unit.json [--report <path>] [--env JAVA_HOME=<jdk>] -- mvn -B test
   python -m crewline evidence --record <task>/evidence/unit.json --repo <dir>
 
-Record: {command, cwd, exit_code, started_at, duration_s, commit, worktree_digest, log, report}
+Record: {command, cwd, exit_code, started_at, duration_s, commit, worktree_digest, log, report, java_version, env}
+The executable is resolved through PATH/PATHEXT (`mvn` -> `mvn.cmd` on Windows); `--env KEY=VALUE` sets a variable for
+this run only (JAVA_HOME also leads PATH); `java_version` records which JDK the run used.
 
   EVD-001  record misses a required field                                        BLOCK
   EVD-002  commit is not the repository HEAD, or the uncommitted state changed   BLOCK (stale evidence)
@@ -28,21 +30,31 @@ from .result import BLOCK, INFO, Result
 REQUIRED = ("command", "exit_code", "started_at", "commit", "worktree_digest", "log")
 
 
-def capture(repo: str, out: str, command: list[str], report: str | None = None, cwd: str | None = None) -> Result:
+def capture(repo: str, out: str, command: list[str], report: str | None = None, cwd: str | None = None,
+            env: list[str] | None = None) -> Result:
     res = Result("run", inputs={"repo": repo, "command": " ".join(command)})
     if not command:
         return Result.not_run("run", "no command given (put it after --)")
+    try:
+        child = clip.child_env(env)
+    except ValueError as e:
+        return Result.not_run("run", str(e))
     outp = Path(out)
     outp.parent.mkdir(parents=True, exist_ok=True)
     log = outp.with_suffix(".log")
     rec = {"command": " ".join(command), "cwd": str(Path(cwd or repo).resolve()),
            "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
            "commit": head(repo), "worktree_digest": worktree_digest(repo), "log": str(log.resolve())}
+    if env:
+        rec["env"] = sorted(p.partition("=")[0] for p in env)       # names only: values may be secrets
+    jv = clip.java_version(child)
+    if jv:
+        rec["java_version"] = jv
     t0 = time.monotonic()
     try:
         with log.open("w", encoding="utf-8", errors="replace") as fh:
-            rec["exit_code"] = subprocess.run(command, cwd=rec["cwd"], stdout=fh, stderr=subprocess.STDOUT,
-                                              shell=False).returncode
+            rec["exit_code"] = subprocess.run(clip.resolve_argv(command, child), cwd=rec["cwd"], stdout=fh,
+                                              stderr=subprocess.STDOUT, shell=False, env=child).returncode
     except OSError as e:
         return Result.not_run("run", f"could not start {command[0]}: {e}")
     rec["duration_s"] = round(time.monotonic() - t0, 1)

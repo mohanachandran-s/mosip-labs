@@ -12,6 +12,7 @@ IMPLEMENTATION_REVIEW is refused until the gate PASSes.
   ROB-004  Thread.sleep / time.sleep / await setTimeout used as a wait in production              BLOCK
   ROB-005  api:true AC with no error-path record (status/error_code + test id)                    BLOCK
   ROB-006  code task missing implementation.robustness (exception_reuse + hot_path_notes)         BLOCK
+  MAN-001  the manifest fails its schema (reported with JSON paths before any check reads it)     BLOCK
 
   python -m crewline robustness --repo <dir> --base <ref> --manifest <m>
 """
@@ -23,6 +24,7 @@ from pathlib import Path
 
 from .coding_standards import _added_lines, is_test_path
 from .gitio import changed_files, git, top
+from .manifest import schema_errors
 from .result import BLOCK, Result
 
 CODE_TASKS = {"feature", "bug-fix", "database-migration", "dependency-upgrade"}
@@ -119,6 +121,10 @@ def run(repo: str, base: str, manifest_path: str) -> Result:
         changed = changed_files(repo, base)
     except (OSError, ValueError, RuntimeError) as e:
         return Result.not_run("robustness", str(e))
+    for err in schema_errors(doc) or []:        # e.g. implementation.robustness as a string: name the field, never crash
+        res.add("MAN-001", BLOCK, err, remediation="fix the manifest (templates/task-manifest.schema.json), then re-run")
+    if res.findings:
+        return res.finish()
 
     task_type = doc.get("task_type") or "test-automation"
     for path, kind in sorted(changed.items()):

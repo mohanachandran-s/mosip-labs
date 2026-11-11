@@ -189,11 +189,13 @@ gates:
     state: SYSTEM_TEST_EXECUTION
     enforced_by: deterministic
     commands: ["branch-env --manifest <task-manifest.json>"]
-    requires: [test_plan.environment_kind is branch-deployed-env or local-stack (or post-merge-deferred with an attributed exception), test_plan.environment names where the BRANCH build runs]
+    requires: [test_plan.environment_kind is branch-deployed-env or local-stack (or post-merge-deferred with an attributed exception, or local-test-rig for a test-rig-only change), test_plan.environment names where the BRANCH build runs]
     on_fail: WAITING_FOR_USER
     note: >-
       Does not provision Q8. It refuses a missing kind (BEV-001), a deferral without an exception (BEV-002),
-      an empty URL (BEV-003), and a released-only host named as the branch (BEV-004). Laptop recipe:
+      an empty URL (BEV-003), and a released-only host named as the branch (BEV-004; an attributed branch_environment
+      exception approves it). local-test-rig: every changed file is in the test rig, so the branch build is the local test
+      jar and a released env is correct (BEV-005 otherwise). Laptop recipe:
       evals/q8-local-stack.md. The user names the env.
 
   system_tests:

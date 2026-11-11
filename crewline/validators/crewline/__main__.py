@@ -128,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--manifest", help="read tracker.key + requirements.story_keys"); p.add_argument("--allow", action="append", default=[])
     p.add_argument("--upstream-repo"); p.add_argument("--pr-repo"); p.add_argument("--pr-base")
     p = sub.add_parser("tools"); p.add_argument("--only", action="append", default=[])
+    p.add_argument("--task-type", dest="tools_task_type", help="probe only what this task type needs (default: active task's)")
     p = sub.add_parser("pack")
     p.add_argument("--list", action="store_true", help="list pack ids")
     p.add_argument("--set", dest="set_pack", help="write packs/ACTIVE (committed default is mosip)")
@@ -141,6 +142,8 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("run")
     p.add_argument("--repo", required=True); p.add_argument("--out", required=True)
     p.add_argument("--report"); p.add_argument("--cwd")
+    p.add_argument("--env", action="append", default=[], metavar="KEY=VALUE",
+                   help="set for this run only, e.g. JAVA_HOME=<jdk> (its bin/ leads PATH); the record keeps the names")
     p = sub.add_parser("clip")
     p.add_argument("--file", help="log path, or - for stdin (omit when a command follows --)")
     p.add_argument("--max-chars", type=int, dest="max_chars")
@@ -267,7 +270,7 @@ def main(argv: list[str] | None = None) -> int:
             keys = a.story + (branch.manifest_keys(a.manifest) if a.manifest else [])
             res = branch.run(a.repo, a.upstream, a.base, keys, a.allow, a.pr_repo, a.pr_base, a.upstream_repo)
         elif a.cmd == "tools":
-            res = tools.run(a.only)
+            res = tools.run(a.only, a.tools_task_type)
         elif a.cmd == "pack":
             if a.list:
                 res = Result("pack", inputs={"packs": pack.list_ids(), "active": pack.active_id()})
@@ -284,8 +287,10 @@ def main(argv: list[str] | None = None) -> int:
             res = regression.run(a.baseline, a.candidate, a.allow_fail)
             if a.out:
                 from . import systest
-                res.inputs.update(baseline_sha256=systest.report_sha256(a.baseline),
-                                  candidate_sha256=systest.report_sha256(a.candidate),
+                base_copy, cand_copy = (regression.snapshot(res, a.out) if res.status != "NOT_RUN"   # the base checkout
+                                        else (a.baseline, a.candidate))                          # can go now (principle 9)
+                res.inputs.update(baseline_sha256=systest.report_sha256(base_copy),
+                                  candidate_sha256=systest.report_sha256(cand_copy),
                                   commit=systest.repo_head(a.candidate),     # REG-007 checks these
                                   worktree_digest=systest.repo_digest(a.candidate))
                 Path(a.out).parent.mkdir(parents=True, exist_ok=True)
@@ -296,7 +301,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 res = coverage.run(a.commons_dir, a.module_root, a.module_code, a.offline)
         elif a.cmd == "run":
-            res = evidence.capture(a.repo, a.out, command, a.report, a.cwd)
+            res = evidence.capture(a.repo, a.out, command, a.report, a.cwd, a.env)
         elif a.cmd == "clip":
             if command:
                 res = clip.run_command(command, a.max_chars)

@@ -7,54 +7,140 @@
   REG-005  case FAILED on base and still fails (pre-existing, not ours)           INFO
   REG-006  case FAILED on base and passes on branch (fixed)                       INFO
 
+  REG-009  a TestRig run (module + language) present on base has no full report on the branch BLOCK
+
+Several TestRig full reports in one folder (one per language: `...-masterdata-eng-<date>-full-report...`) are paired by
+the name before the date, newest per name, and every pair is compared; a single report compares as before.
+With `--out`, the compared reports are copied to `<out dir>/reports/<out stem>/{base,branch}/` and the record hashes
+those copies (REG-007), so the base checkout can be removed right after its run (principle 9).
+
 `--allow-fail <uid>` covers REG-001/REG-002 for a case with an attributed quality-gate exception
 (e.g. a known application defect). Both runs must be full suites (empty testCasesToExecute) on the
 same environment, run one after the other. Reports: TestRig full-report HTML, JUnit/Surefire XML, Cucumber JSON (UI rig).
 """
 from __future__ import annotations
 
+import re
+import shutil
 from pathlib import Path
 
-from .report import case_status, find_full_report
+from .report import case_status, find_full_report, junit_files
 from .result import BLOCK, INFO, WARN, Result
+
+RUN_KEY = re.compile(r"^(.+?)-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}(?:-\d{2})?-full-report", re.I)
+
+
+def full_reports(folder: str | Path) -> dict[str, Path]:
+    """TestRig full reports in `folder` by run key (`<env>-<module>-<lang>`), newest per key; {} for anything else."""
+    p = Path(folder)
+    if not p.is_dir():
+        return {}
+    out: dict[str, Path] = {}
+    for f in sorted(p.glob("*full-report*.html")):           # the timestamp sorts: the last one per key is the newest
+        m = RUN_KEY.match(f.name)
+        if m:
+            out[m.group(1)] = f
+    return out
+
+
+def pairs(baseline: str, candidate: str) -> list[tuple[str, Path | None, Path | None]]:
+    """(key, base report, branch report) when either side holds more than one keyed TestRig run, else []."""
+    base, cand = full_reports(baseline), full_reports(candidate)
+    if len(base) < 2 and len(cand) < 2:
+        return []
+    return [(k, base.get(k), cand.get(k)) for k in sorted(set(base) | set(cand))]
+
+
+def compared_files(path: str | Path) -> list[Path]:
+    """The files a single comparison read: the full report, the cucumber.json, or the JUnit XMLs."""
+    report = find_full_report(path)
+    return junit_files(report) if report.is_dir() else [report]
+
+
+def snapshot(res: Result, out: str | Path) -> tuple[Path, Path]:
+    """Copy what `res` compared to <out dir>/reports/<out stem>/{base,branch}/ and record the copies."""
+    root = Path(out).resolve().parent / "reports" / Path(out).stem
+    dirs = {}
+    for side, key in (("base", "baseline"), ("branch", "candidate")):
+        dest = root / side
+        if dest.exists():
+            shutil.rmtree(dest)
+        dest.mkdir(parents=True)
+        files = res.inputs.get(f"{key}_files") or []
+        for f in files:
+            shutil.copy2(f, dest / Path(f).name)
+        res.inputs[f"{key}_copy"] = str(dest)
+        dirs[side] = dest
+    return dirs["base"], dirs["branch"]
 
 
 def run(baseline: str, candidate: str, allow_fail: list[str] | None = None) -> Result:
     res = Result("full-regression", inputs={"baseline": str(Path(baseline).resolve()), "candidate": str(Path(candidate).resolve())})
     allow = {a.lower() for a in (allow_fail or [])}
+    paired = pairs(baseline, candidate)
+    if paired:
+        res.inputs["pairs"] = []
+        res.inputs["baseline_files"], res.inputs["candidate_files"] = [], []
+        for key, b, c in paired:
+            if c is None:
+                res.add("REG-009", BLOCK, f"{key}: run on base ({b.name}) has no full report on the branch",
+                        evidence=key, remediation="run that module/language on the branch too, or remove the base report")
+                continue
+            if b is None:
+                res.add("REG-004", WARN, f"{key}: branch run has no base run to compare with", evidence=key)
+                continue
+            try:
+                base, cand = case_status(b), case_status(c)
+            except (OSError, ValueError) as e:
+                return Result.not_run("full-regression", f"{key}: {e}")
+            if not base or not cand:
+                return Result.not_run("full-regression", f"{key}: empty run: baseline {len(base)} / candidate {len(cand)} cases")
+            res.inputs["pairs"].append({"key": key, "baseline_report": b.name, "candidate_report": c.name})
+            res.inputs["baseline_files"].append(str(b))
+            res.inputs["candidate_files"].append(str(c))
+            _compare(res, base, cand, allow, f"[{key}] ")
+        if not res.inputs["pairs"] and not res.findings:
+            return Result.not_run("full-regression", "no base/branch report pair to compare")
+        return res.finish()
     try:
         base, cand = case_status(baseline), case_status(candidate)
         res.inputs["baseline_report"] = find_full_report(baseline).name
         res.inputs["candidate_report"] = find_full_report(candidate).name
+        res.inputs["baseline_files"] = [str(f) for f in compared_files(baseline)]
+        res.inputs["candidate_files"] = [str(f) for f in compared_files(candidate)]
     except (OSError, ValueError) as e:
         return Result.not_run("full-regression", str(e))
     if not base or not cand:
         return Result.not_run("full-regression", f"empty run: baseline {len(base)} / candidate {len(cand)} cases")
+    _compare(res, base, cand, allow)
+    return res.finish()
 
+
+def _compare(res: Result, base: dict, cand: dict, allow: set[str], tag: str = "") -> None:
     for uid, now in sorted(cand.items()):
         was = base.get(uid)
         covered = uid.lower() in allow
         if was == "PASS" and now == "FAIL":
-            f = res.add("REG-001", BLOCK, f"{uid}: PASS on base, FAIL on branch (new break)", evidence=uid)
+            f = res.add("REG-001", BLOCK, f"{tag}{uid}: PASS on base, FAIL on branch (new break)", evidence=uid)
         elif was is None and now == "FAIL":
-            f = res.add("REG-002", BLOCK, f"{uid}: new case fails", evidence=uid)
+            f = res.add("REG-002", BLOCK, f"{tag}{uid}: new case fails", evidence=uid)
         elif was == "PASS" and now == "SKIP":
-            res.add("REG-003", WARN, f"{uid}: PASS on base, SKIPPED on branch", evidence=uid)
+            res.add("REG-003", WARN, f"{tag}{uid}: PASS on base, SKIPPED on branch", evidence=uid)
             continue
         elif was == "FAIL" and now == "FAIL":
-            res.add("REG-005", INFO, f"{uid}: fails on base too (pre-existing)", evidence=uid)
+            res.add("REG-005", INFO, f"{tag}{uid}: fails on base too (pre-existing)", evidence=uid)
             continue
         elif was == "FAIL" and now == "PASS":
-            res.add("REG-006", INFO, f"{uid}: fixed (FAIL on base, PASS on branch)", evidence=uid)
+            res.add("REG-006", INFO, f"{tag}{uid}: fixed (FAIL on base, PASS on branch)", evidence=uid)
             continue
         else:
             continue
         if covered:
             f.approved_by = "quality-gate exception"
     for uid in sorted(set(base) - set(cand)):
-        res.add("REG-004", WARN, f"{uid}: on base ({base[uid]}) but missing from the branch run", evidence=uid)
+        res.add("REG-004", WARN, f"{tag}{uid}: on base ({base[uid]}) but missing from the branch run", evidence=uid)
 
-    count = lambda d, s: sum(1 for v in d.values() if v == s)
-    res.inputs["baseline_counts"] = {s: count(base, s) for s in ("PASS", "FAIL", "SKIP")}
-    res.inputs["candidate_counts"] = {s: count(cand, s) for s in ("PASS", "FAIL", "SKIP")}
-    return res.finish()
+    for side, d in (("baseline_counts", base), ("candidate_counts", cand)):
+        counts = res.inputs.setdefault(side, {"PASS": 0, "FAIL": 0, "SKIP": 0})
+        for s in counts:
+            counts[s] += sum(1 for v in d.values() if v == s)

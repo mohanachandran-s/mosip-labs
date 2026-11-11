@@ -27,6 +27,31 @@ stopped it. Stricter for tasks in progress: USE-001 is now a BLOCK, and USE-010/
   the plugin cache (lost on update); it now refuses (TSK-011). Seen in the Java 21/25 migration session, which moved the task by
   hand and spent five calls reading the schema and hand-writing the manifest.
 
+Efficiency findings from MOSIP-45750 (Java 21 -> 25 upgrade, run on 0.7.2). Stricter for tasks in progress: TRN-004, TRN-005.
+- **Tasks stay in the clone (#3):** in any git clone, onboarded or not, the task root is `<main clone>/.crewline-work/tasks`
+  (the plugin cache only outside git, or in the Crewline source clone); `task new` adds `.crewline-work/` to
+  `.git/info/exclude`. No more `CREWLINE_TASKS` on every shell call.
+- **`crewline run` on Windows (#13, #15, #6):** the executable is resolved through PATH/PATHEXT (`mvn` -> `mvn.cmd`; was
+  WinError 2). `--env KEY=VALUE` sets a variable for one run (`JAVA_HOME` also leads PATH); the record keeps the names, and
+  `java_version` says which JDK produced the evidence. Commands run with `MSYS_NO_PATHCONV=1`.
+- **Schema first (#4, #14, #16):** `manifest` reports every MAN-001 at once, each with its JSON path
+  (`$.scope.repositories[0]`) and an enum's allowed values; a type error after that is a named MAN-001, not an
+  `AttributeError`. `robustness` validates the manifest before reading it.
+- **BEV-004 exception, `local-test-rig` (#18, #9):** an attributed `branch_environment` exception approves BEV-004, so the gate
+  PASSes from the command, not a manual override. New `environment_kind: local-test-rig` for a change confined to the test
+  rig (`api-test/`, `apitest-commons/`, UI/DSL rigs): the branch build is the local test jar, so a released env is the right
+  target. BEV-005 refuses it when a changed file is outside the rig.
+- **Regression (#21, #22):** a folder with one TestRig full report per language is paired by run (`<env>-<module>-<lang>`,
+  newest each) and every pair compared; a base run with no branch run BLOCKs (REG-009). `--out` copies the compared reports to
+  `<out dir>/reports/<out stem>/{base,branch}` and REG-007 hashes those copies, so the base checkout can be removed right
+  after its run.
+- **`tools --task-type` (#1):** capabilities whose `needed_for` names only other task types are skipped (TOOL-003), e.g. helm
+  for a dependency-upgrade. Defaults to the active task's type.
+- **Gates when their state ends (#10, #23):** leaving a state on the main line checks the gates it owns that a later entry
+  guard needs (TRN-004: plan_readiness on leaving IMPLEMENTATION_PLAN, not at IMPLEMENTATION). SYSTEM_TEST_EXECUTION ->
+  FAILURE_TRIAGE is refused while full_regression is PASS (TRN-005), and entering FAILURE_TRIAGE clears
+  `repair.classification`.
+
 ## 0.7.4
 The rest of what PP-PYSDK found. Stricter rules for tasks in progress: REQ-005/006, PKT-005, MAN-019, CIC-001; DCV-005 can block.
 Closes mosip/mosip-labs#117, #118, #119, #120, #121, #122.

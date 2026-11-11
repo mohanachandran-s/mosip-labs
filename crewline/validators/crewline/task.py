@@ -338,6 +338,10 @@ def run(action: str, task_id: str | None = None, task_type: str | None = None,
             res.add("TSK-002", BLOCK, f"{dest} already exists")
             return res.finish()
         doc = skeleton(task_id, task_type)
+        if not clones and root.parent.name == ".crewline-work":          # tasks_root() picked the enclosing clone
+            top = gitio.git(root.parent.parent, "rev-parse", "--show-toplevel", check=False).strip()
+            if top:
+                _exclude(Path(top), [".crewline-work/"])
         if clones:
             doc["scope"]["module"] = clones[0].name
             doc["scope"]["repositories"] = [{"name": c.name, "path": c.as_posix(), "role": "primary" if i == 0 else "dependency"}

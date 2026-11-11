@@ -119,12 +119,14 @@ def repo_digest(path: str | Path) -> str:
 def stale_reason(inputs: dict) -> str:
     """Why a full-regression record no longer describes the branch, or "" when it still does."""
     cand, base = inputs.get("candidate") or "", inputs.get("baseline") or ""
+    cand_report = inputs.get("candidate_copy") or cand          # hashes are of the copies under evidence/reports/
+    base_report = inputs.get("baseline_copy") or base
     if not (inputs.get("baseline_sha256") and inputs.get("candidate_sha256") and inputs.get("commit")
             and inputs.get("worktree_digest")):
         return "has no report hashes / commit / worktree_digest (written by hand, or by Crewline < 0.7.0)"
     if inputs["baseline_sha256"] == inputs["candidate_sha256"]:
         return "compares a report with itself"
-    if report_sha256(cand) != inputs["candidate_sha256"] or report_sha256(base) != inputs["baseline_sha256"]:
+    if report_sha256(cand_report) != inputs["candidate_sha256"] or report_sha256(base_report) != inputs["baseline_sha256"]:
         return "a report changed or is gone since the record was written"
     if repo_head(cand) != inputs["commit"]:
         return f"ran at {inputs['commit'][:12]}, HEAD is now {repo_head(cand)[:12] or 'unknown'}"

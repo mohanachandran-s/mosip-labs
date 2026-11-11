@@ -4,7 +4,10 @@
 - a repository with a `.crewline/` folder    <main clone>/.crewline-work/tasks/  (also from inside a task worktree:
                                               the main clone is found through git's common dir, so one clone has one
                                               task list)
-- anything else (a Crewline clone)            <core>/tasks/
+- any other git clone (not yet onboarded)      <main clone>/.crewline-work/tasks/  (`task new` adds `.crewline-work/`
+                                              to .git/info/exclude)
+- outside any git clone, or in the Crewline   <core>/tasks/
+  source clone itself
 
 A task worktree (<main clone>/.crewline-work/worktrees/<id>) is cut from the upstream base, which usually has no `.crewline/`.
 It is still an active Crewline checkout: the module's context is found by `context_dir`, never copied into it (ADR-0009).
@@ -82,8 +85,18 @@ def tasks_root(cwd: str | os.PathLike | None = None) -> Path:
         return main_clone(top) / ".crewline-work" / "tasks"
     start = Path(cwd or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
     git_top = _git(start if start.is_dir() else start.parent, "rev-parse", "--show-toplevel")
-    kept = main_clone(Path(git_top)) / ".crewline-work" / "tasks" if git_top else None
-    return kept if kept and kept.is_dir() else CORE / "tasks"      # a clone whose context is on another worktree still keeps its tasks
+    if git_top and not _is_crewline_source(Path(git_top)):
+        # Any other git clone keeps its tasks, onboarded or not: <core>/tasks is the plugin cache, lost on update.
+        return main_clone(Path(git_top)) / ".crewline-work" / "tasks"
+    return CORE / "tasks"
+
+
+def _is_crewline_source(top: Path) -> bool:
+    """`top` is the clone Crewline itself runs from (developing Crewline): its tasks stay in <core>/tasks."""
+    try:
+        return CORE.resolve().is_relative_to(top.resolve())
+    except OSError:
+        return False
 
 
 def disabled(env: dict | None = None) -> bool:
