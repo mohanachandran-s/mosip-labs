@@ -134,9 +134,17 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
     TestRig/surefire report. Developer → QA is the manifest (`code_refs`, `test_ids`, evidence paths) plus the packet,
     not the chat. Never poll
     (AwaitShell / PR monitor event). One focused WAITING_FOR_USER question. `python -m crewline usage --manifest <m>
-    --mark "<step>"` at each step; at every stage change and before QUALITY_GATE run `python -m crewline usage
-    --manifest <m> --transcript <session.jsonl>`. FAIL (USE-003/004/007/008) -> WAITING_FOR_USER (continue / split /
-    abort). Link `usage.md` (`usage_ref`).
+    --mark "<step>"` at each step; at every stage change, after every subagent hand-back, and before QUALITY_GATE run
+    `python -m crewline usage --manifest <m>` (it finds this session's transcript and its subagents by itself;
+    `--transcript` only overrides). FAIL (USE-001/003/004/007/008/010/011) -> WAITING_FOR_USER (continue / split /
+    abort). USE-012 on `main` -> `/compact` now, or end the session and continue with `crewline resume <id>`.
+    Link `usage.md` (`usage_ref`).
+14a. **Many-file batches (coverage matrices, YAML suites):** before the first batch, one specialist writes
+    `packets/FACTS.md` (endpoint -> validations -> error codes, file:line, ≤ `packet_max_chars`); every batch brief
+    names it and the designer reads it instead of the source tree. At most 4 files per designer run and at most 2
+    designers at once: parallel runs do not use fewer tokens and they hit the plan's usage limit together, stall,
+    and re-write their whole context when resumed. A follow-up to a finished subagent past ~120k context is a fresh
+    run with a packet, not a `SendMessage` (each message re-reads all of it).
 
 ## Must not
 

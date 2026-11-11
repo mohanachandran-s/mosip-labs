@@ -8,8 +8,10 @@ description: "Use for MOSIP engineering work across the SDLC: features, bug fixe
 Core: `${CLAUDE_PLUGIN_ROOT}` (the installed plugin). This file is a thin adapter. The workflow, templates, gates, permissions and agent contracts live in the core.
 
 **Token fire-break:** after INTAKE do not re-read `principles.md` or every agent file. One subagent, smallest packet
-(ACs + FAIL findings). Never paste reports. Never poll. `crewline usage --mark` each step; `crewline usage --transcript`
-at each stage change. FAIL the budget -> STOP (continue / split / abort).
+(ACs + FAIL findings). Never paste reports. Never poll. `crewline usage --mark` each step; `crewline usage --manifest <m>`
+(finds the transcript itself) at each stage change and after each subagent hand-back. FAIL the budget -> STOP
+(continue / split / abort). USE-012 on main -> `/compact` or a new session via `crewline resume`. Many-file batches:
+`packets/FACTS.md` first, ≤4 files per designer, ≤2 designers at once, fresh run instead of SendMessage past ~120k.
 
 **Search, clip, hand off:** Read / Grep / Glob after `local-context.md` (not `cat`/`find` of the tree). Bulky commands
 through `crewline run`; read CLIP-002 or `crewline clip --file <log>`, never the raw log. Hooks deny `cat` of logs and

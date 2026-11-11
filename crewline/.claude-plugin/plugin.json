@@ -1,7 +1,7 @@
 {
   "name": "crewline",
   "displayName": "Crewline",
-  "version": "0.7.4",
+  "version": "0.8.0",
   "description": "Gated, evidence-first AI engineering workflow for MOSIP: role agents, deterministic validators, human approvals. Activates in repositories that carry a .crewline/ folder.",
   "author": {
     "name": "MOSIP",

@@ -17,7 +17,7 @@ commit/push, so a chat cannot pass for a done SDLC. [Why Crewline on Cursor or C
 
 | | |
 |---|---|
-| Version | `0.7.4` (see `VERSION`) |
+| Version | `0.8.0` (see `VERSION`) |
 | Design | `../AI_Engineering_Agent_Full_SDLC_Implementation_Blueprint_v2.1.html` (authoritative) and `../AI_Engineering_Agent_Full_SDLC_Updated_Plan_v1.3.html` |
 | Lineage | Copied from the SDET Architect Assistant 0.2.0. Its proven workflow is the `test-automation` task type and the `agents/qa/` specialty |
 | Pilots | **PILOT-001** (test automation): [mosip/pre-registration#1088](https://github.com/mosip/pre-registration/pull/1088) · **PILOT-002** (bug fix MOSIP-38854): [mosip/pre-registration#1089](https://github.com/mosip/pre-registration/pull/1089) |
@@ -704,7 +704,7 @@ Run from `validators/`: `python -m crewline [--json] <command> ...`. Exit codes:
 | `secrets` | SEC-001..005 | gitleaks when present; values never printed |
 | `tools` | TOOL-000..002 | capabilities from `core/tools.yaml` + active pack overlay; numbered enable steps |
 | `pack` | PCK-001..002 | show / list / `--set` product pack (`mosip` default, `generic` for a non-MOSIP repo) |
-| `usage` | USE-001..009 | token usage per task/stage/step **and** budget stop (`token_budget` gate); packet size; `--apply` stamps a mark (USE-009) |
+| `usage` | USE-001..012 | token usage per task/stage/step **and** budget stop (`token_budget` gate); packet size; `--apply` stamps a mark (USE-009) |
 | `discover` | DSC-001..009 | module onboarding: reads poms, tests, CI, DB scripts, deploy, guidance, TestRig suites and coding-standard checkers read-only; writes evidence-labelled drafts and a baseline |
 | `guard` | GRD-001..009 | commit/push/PR gated; **GRD-009** PR title not prefixed `<tracker key>: ` or body not linking the ticket; force-push / `--no-verify` / prod always denied; **GRD-007** raw log dump or suite not via `crewline run`; **GRD-008** Read of a dump or file over `read_max_bytes` |
 | `manifest --next` / `status` | NXT-001..004, STS-001 | every legal move and each precondition with its state; repair attempts left, open approvals. Read these before offering the user a choice |
@@ -728,7 +728,10 @@ python -m crewline evidence --record .crewline-work/tasks/<id>/evidence/unit.jso
 
 **Token budget is a stop, not a report** (`core/usage-budget.yaml`, gate `token_budget`, principle 36). PILOT-001 spent
 about 3M tokens per review round and 6.7M waiting on background runs. `crewline usage` FAILs when the **task** or a
-**state** exceeds the cap (USE-003/004). That is WAITING_FOR_USER: continue with an attributed exception, split the
+**state** exceeds the cap (USE-003/004), or one **subagent** exceeds `per_subagent` (USE-011). KM-COV-001 spent 94M
+against an 8M cap because the meter was never given a transcript and passed on 0 calls; now it finds the Claude
+transcript itself and a blind meter on Claude BLOCKs (USE-001/010). A call whose context passes `context_warn` warns
+(USE-012): `/compact` the orchestrator or resume in a new session; give a subagent a smaller batch. That is WAITING_FOR_USER: continue with an attributed exception, split the
 task, or abort. Specialist packets under `tasks/<id>/packets/` over `packet_max_chars` or that dump core/reports also
 FAIL (USE-007/008). Cursor often has no API transcript: USE-006, and the adapter **token fire-break** is the control
 (do not re-read core after INTAKE, do not paste reports, do not poll). `crewline clip` is the bash-output reducer
@@ -742,7 +745,8 @@ attributes each call:
 
 ```bash
 python -m crewline usage --manifest .crewline-work/tasks/<id>/task-manifest.json --mark "IMPLEMENTATION: minimal fix"   # start a step
-python -m crewline usage --manifest .crewline-work/tasks/<id>/task-manifest.json --transcript <session>.jsonl            # .crewline-work/tasks/<id>/usage.md
+python -m crewline usage --manifest .crewline-work/tasks/<id>/task-manifest.json                                       # .crewline-work/tasks/<id>/usage.md
+python -m crewline usage --manifest .crewline-work/tasks/<id>/task-manifest.json --transcript <session>.jsonl            # explicit transcript
 ```
 
 | Column | Meaning |
@@ -751,7 +755,9 @@ python -m crewline usage --manifest .crewline-work/tasks/<id>/task-manifest.json
 | cache read | conversation re-read from cache; usually the largest, cheap per token |
 | total | everything |
 
-A task that spans sessions lists every transcript in `usage_transcripts`.
+Without `--transcript` or `usage_transcripts`, the meter reads every `~/.claude/projects/<slug>/*.jsonl` (or
+`$CLAUDE_CONFIG_DIR`) for the clone and its `.crewline-work` worktrees written since `started_at`, so a task that spans
+sessions is covered. `usage.md` also has a **By agent** table (main = orchestrator) with each one's peak context.
 
 ---
 

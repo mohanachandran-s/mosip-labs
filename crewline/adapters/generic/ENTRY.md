@@ -5,7 +5,8 @@ specialist agents (requirements, architecture, development, SDET, security, DevO
 The core lives at `{{CORE}}`.
 
 **Token fire-break:** after INTAKE do not re-read `principles.md` or every agent file. One specialist, smallest packet,
-never paste reports, never poll. `crewline usage --mark` each step; budget FAIL -> STOP.
+never paste reports, never poll. `crewline usage --mark` each step; budget FAIL -> STOP. Many-file batches: write
+`packets/FACTS.md` once, ≤4 files per specialist run, ≤2 runs at once, append rows instead of rewriting files.
 
 **Search, clip, hand off:** Read / Grep / Glob after `local-context.md` (not `cat`/`find` of the tree). Bulky commands
 through `python -m crewline run`; read CLIP-002 or `python -m crewline clip --file <log>`, never the raw log. Hooks deny

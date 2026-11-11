@@ -2,6 +2,7 @@
 name: testcase-designer
 description: "Propose scenarios as coverage-matrix rows first, then the smallest YAML patch in the existing API TestRig format."
 tools: Read, Grep, Glob, Bash, Edit, Write
+model: sonnet
 permission_profile: "workspace-write"
 workflow_states: "TESTCASE_DESIGN"
 ---
@@ -23,6 +24,20 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `coverage/AGENTS.
 - subject matrix file
 - nearby YAML cases + `.hbs` templates
 - module `coverage/AGENTS.md`
+- `packets/FACTS.md` when the brief names it: endpoint -> validations -> error codes, with file:line
+
+## Token rules (KM-COV-001 spent 94M tokens here; budget is 8M per task)
+
+- **Facts first, source never twice.** When the brief names `packets/FACTS.md`, take validations and error codes from
+  it. Open service / DTO / exception-handler source only for a fact it lacks, with `grep -n` or `sed -n <range>p`,
+  and append that fact to `FACTS.md` so the next batch does not look again. No facts packet and more than one batch
+  planned -> return NEEDS_INPUT asking for it instead of researching the whole module yourself.
+- **One batch = at most 4 matrix files.** More in the brief -> do 4, return DONE with the rest under `proposed_changes`.
+- **Append, do not rewrite.** Edit only the rows you add or change, anchored on the nearest existing row. Never
+  re-emit a whole table or file; never write a generator script larger than the rows it writes.
+- Read a file once; after your own Edit, trust it (no re-Read to check). Keep reasoning short: the rule is in
+  `coverage/AGENTS.md`, not something to re-derive per row.
+- Past ~120k context, stop at the next file boundary and return DONE with what is left; a fresh run continues.
 
 ## Produces
 

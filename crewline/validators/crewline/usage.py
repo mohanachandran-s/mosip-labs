@@ -11,7 +11,11 @@ Token kinds: input (uncached), cache_write, cache_read, output. `fresh` = input 
 were new to the model in that call; cache_read is the re-read conversation, cheap but often the largest number.
 Calls are de-duplicated by message id. The numbers are what the API reported, not estimates.
 
-  USE-001  no transcript records fall inside the task's time window   WARN
+With no --transcript and no `usage_transcripts` on the manifest, the Claude Code transcripts are found by themselves:
+every <claude config>/projects/<slug>/*.jsonl whose slug is the clone (or one of its .crewline-work worktrees) and that
+was written after started_at. `CLAUDE_CONFIG_DIR` overrides ~/.claude.
+
+  USE-001  transcripts were found but no call falls inside the task's time window  BLOCK (the meter is blind)
   USE-002  manifest has no started_at                                 BLOCK (cannot attribute usage)
   USE-003  task total tokens exceed usage-budget.yaml per_task        BLOCK
   USE-004  a workflow state exceeds its per_state / hot_states cap    BLOCK
@@ -20,6 +24,10 @@ Calls are de-duplicated by message id. The numbers are what the API reported, no
   USE-007  a specialist packet on disk exceeds packet_max_chars       BLOCK
   USE-008  a packet looks like a dump of Crewline core / a full report BLOCK
   USE-009  a recorded transition has no usage_mark (Cursor has no transcript; --apply must stamp one) BLOCK
+  USE-010  running under Claude Code (CLAUDECODE=1) and no transcript found: the budget cannot stop   BLOCK
+  USE-011  one subagent's total exceeds per_subagent (split its batch; brief from the facts packet)  BLOCK
+  USE-012  a call's context exceeded context_warn (orchestrator: /compact or resume in a new session;
+           subagent: smaller batch, do not keep SendMessage-ing it)                                  WARN
 
 Exceeding a budget is WAITING_FOR_USER: continue (attributed exception on token_budget), split the task, or abort.
 """
@@ -27,6 +35,7 @@ from __future__ import annotations
 
 import bisect
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -88,9 +97,39 @@ def calls(transcripts: list[str]) -> list[dict]:
                     continue
                 key = msg.get("id") or f"{f.name}:{d.get('uuid')}"
                 seen[key] = {"at": _ts(d["timestamp"]), "model": msg.get("model", ""), "subagent": f.parent.name == "subagents",
+                             "source": f.stem if f.parent.name == "subagents" else "main",
                              "input": u.get("input_tokens", 0) or 0, "cache_write": u.get("cache_creation_input_tokens", 0) or 0,
                              "cache_read": u.get("cache_read_input_tokens", 0) or 0, "output": u.get("output_tokens", 0) or 0}
     return sorted(seen.values(), key=lambda c: c["at"])
+
+
+def _slug(path: Path) -> str:
+    """Claude Code's project folder name: every non-alphanumeric character of the absolute path becomes '-'."""
+    return re.sub(r"[^A-Za-z0-9]", "-", str(path))
+
+
+def discover(manifest_path: str, started_at: str) -> list[str]:
+    """Claude Code transcripts of sessions run in the task's clone or its worktrees since the task started."""
+    root = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects"
+    m = Path(manifest_path).resolve()
+    # <clone>/.crewline-work/tasks/<id>/task-manifest.json -> <clone>
+    clone = m.parents[3] if len(m.parents) > 3 and m.parents[2].name == ".crewline-work" else None
+    if clone is None or not root.is_dir():
+        return []
+    prefix = _slug(clone).lower()
+    since = _ts(started_at) - 60
+    out: list[str] = []
+    for d in root.iterdir():
+        name = d.name.lower()
+        if not d.is_dir() or not (name == prefix or name.startswith(prefix + "--crewline-work-")):
+            continue
+        for f in d.glob("*.jsonl"):
+            try:
+                if f.stat().st_mtime >= since:
+                    out.append(str(f))
+            except OSError:
+                continue
+    return sorted(out)
 
 
 def load_budget(doc: dict) -> dict:
@@ -107,6 +146,8 @@ def load_budget(doc: dict) -> dict:
         "warn_ratio": float(over.get("warn_ratio", raw.get("warn_ratio", 0.7))),
         "hot_states": hot,
         "packet_max_chars": int(over.get("packet_max_chars", raw.get("packet_max_chars", 20000))),
+        "per_subagent": int(over.get("per_subagent", raw.get("per_subagent", 1500000))),
+        "context_warn": int(over.get("context_warn", raw.get("context_warn", 150000))),
     }
 
 
@@ -149,6 +190,9 @@ def report(manifest_path: str, transcripts: list[str], out: str | None = None) -
     # a task can span sessions: transcripts recorded in the manifest are always included
     transcripts = list(dict.fromkeys(doc.get("usage_transcripts", []) + list(transcripts)))
     transcripts = [t for t in transcripts if Path(t).is_file()]
+    if not transcripts:
+        transcripts = discover(manifest_path, doc["started_at"])
+        res.inputs["discovered"] = bool(transcripts)
     res.inputs["transcripts"] = transcripts
     start = _ts(doc["started_at"])
     end = _ts(doc["finished_at"]) if doc.get("finished_at") else float("inf")
@@ -158,21 +202,41 @@ def report(manifest_path: str, transcripts: list[str], out: str | None = None) -
     marks = sorted(doc.get("usage_marks", []), key=lambda m: m["at"])
     mark_at = [_ts(m["at"]) for m in marks]
 
-    overall, by_stage, by_step = _bucket(), {}, {}
+    overall, by_stage, by_step, by_agent, peak = _bucket(), {}, {}, {}, {}
     for c in calls(transcripts):
         if not start <= c["at"] <= end:
             continue
         stage = stage_name[bisect.bisect_right(stage_at, c["at"]) - 1]
         i = bisect.bisect_right(mark_at, c["at"]) - 1
         step = marks[i]["label"] if i >= 0 else "(before first step mark)"
-        for b in (overall, by_stage.setdefault(stage, _bucket()), by_step.setdefault(step, _bucket())):
+        for b in (overall, by_stage.setdefault(stage, _bucket()), by_step.setdefault(step, _bucket()),
+                  by_agent.setdefault(c["source"], _bucket())):
             _add(b, c)
+        ctx = c["input"] + c["cache_write"] + c["cache_read"]
+        peak[c["source"]] = max(peak.get(c["source"], 0), ctx)
+    for src, b in by_agent.items():
+        b["peak_context"] = peak.get(src, 0)
     budget = load_budget(doc)
     if not overall["calls"]:
-        res.add("USE-001", WARN, "no model calls recorded in the task window (wrong transcript?)")
-        res.add("USE-006", INFO, "no metered API calls: on Cursor the adapter token fire-break is the control; "
-                "on Claude pass --transcript so the budget can stop the task")
+        if transcripts:
+            res.add("USE-001", BLOCK, f"{len(transcripts)} transcript(s) but no model call inside the task window "
+                    "(wrong transcript or started_at?): the budget cannot stop the task")
+        elif os.environ.get("CLAUDECODE") == "1":
+            res.add("USE-010", BLOCK, "Claude Code session but no transcript found: pass --transcript <session.jsonl> "
+                    "(~/.claude/projects/<slug>/<session-id>.jsonl) or record it in usage_transcripts")
+        else:
+            res.add("USE-006", INFO, "no metered API calls: on Cursor the adapter token fire-break is the control; "
+                    "on Claude pass --transcript so the budget can stop the task")
     else:
+        for src, b in by_agent.items():
+            if src != "main" and b["total"] > budget["per_subagent"]:
+                res.add("USE-011", BLOCK, f"subagent {src}: {b['total']:,} exceeds per_subagent {budget['per_subagent']:,} "
+                        "(split its batch; brief it from packets/FACTS.md, not the source tree)")
+            if b["peak_context"] > budget["context_warn"]:
+                fix = ("/compact or resume in a new session (crewline task resume)" if src == "main"
+                       else "smaller batch; start a fresh subagent with a packet instead of SendMessage")
+                res.add("USE-012", WARN, f"{src}: context reached {b['peak_context']:,} "
+                        f"(context_warn {budget['context_warn']:,}); every call re-reads it: {fix}")
         if overall["total"] > budget["per_task"]:
             res.add("USE-003", BLOCK, f"task total {overall['total']:,} exceeds budget {budget['per_task']:,} "
                     "(core/usage-budget.yaml). WAITING_FOR_USER: continue (exception token_budget) / split / abort")
@@ -196,7 +260,7 @@ def report(manifest_path: str, transcripts: list[str], out: str | None = None) -
     _check_packets(manifest_path, budget, res)
     data = {"task_id": doc.get("task_id"), "generated_at": now_iso(), "window": [doc["started_at"], doc.get("finished_at")],
             "budget": budget,
-            "overall": overall, "by_stage": by_stage, "by_step": by_step,
+            "overall": overall, "by_stage": by_stage, "by_step": by_step, "by_agent": by_agent,
             "note": "fresh = input + cache_write + output; total adds cache_read (re-read context)."}
     target = Path(out) if out else Path(manifest_path).with_name("usage.json")
     target.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
@@ -221,4 +285,4 @@ def to_markdown(data: dict) -> str:
     return (f"# Token usage - {data['task_id']}\n\nWindow {data['window'][0]} -> {data['window'][1] or 'now'} "
             f"(generated {data['generated_at']}). {data['note']}\n\n"
             + table("Overall", {"task": data["overall"]}) + "\n" + table("By stage", data["by_stage"]) + "\n"
-            + table("By step", data["by_step"]))
+            + table("By step", data["by_step"]) + "\n" + table("By agent (main = orchestrator)", data.get("by_agent", {})))

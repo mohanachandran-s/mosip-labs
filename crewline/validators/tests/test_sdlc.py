@@ -662,6 +662,66 @@ def test_usage_budget_blocks_when_over_cap(tmp_path):
     assert {"USE-003", "USE-004"} <= found
 
 
+def _usage_rec(ts, mid, cr, o=10):
+    return json.dumps({"timestamp": ts, "message": {"id": mid, "model": "m", "usage": {
+        "input_tokens": 1, "cache_creation_input_tokens": 0, "cache_read_input_tokens": cr, "output_tokens": o}}})
+
+
+def test_usage_discovers_claude_transcripts(tmp_path, monkeypatch):
+    clone = tmp_path / "repo" / "keymanager"
+    task = clone / ".crewline-work" / "tasks" / "T-1"
+    task.mkdir(parents=True)
+    m = write(task, doc(started_at="2026-10-28T10:00:00Z"), "task-manifest.json")
+    cfg = tmp_path / "cfg"
+    real, base = usage._slug, usage._slug(clone.resolve())
+    assert real(Path("D:/Mohan/Api_Automation/keymanager")) in ("D--Mohan-Api-Automation-keymanager",
+                                                                "-D-Mohan-Api-Automation-keymanager")
+    monkeypatch.setattr(usage, "_slug", lambda p: real(p).replace(base, "K"))   # Windows MAX_PATH in tmp
+    slug = usage._slug(clone.resolve())
+    main = cfg / "projects" / slug / "sess.jsonl"
+    main.parent.mkdir(parents=True)
+    main.write_text(_usage_rec("2026-10-28T10:01:00Z", "a", 100), encoding="utf-8")
+    wt = cfg / "projects" / usage._slug(clone.resolve() / ".crewline-work" / "worktrees" / "T-1") / "s2.jsonl"
+    wt.parent.mkdir(parents=True)
+    wt.write_text(_usage_rec("2026-10-28T10:02:00Z", "b", 100), encoding="utf-8")
+    other = cfg / "projects" / (slug + "-other") / "s3.jsonl"           # a different repo with a longer name
+    other.parent.mkdir(parents=True)
+    other.write_text(_usage_rec("2026-10-28T10:03:00Z", "c", 100), encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cfg))
+    res = usage.report(m, [])
+    assert res.inputs["overall"]["calls"] == 2 and res.inputs["discovered"]
+
+
+def test_usage_blind_meter_blocks(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "none"))
+    monkeypatch.setenv("CLAUDECODE", "1")
+    m = write(tmp_path, doc(started_at="2026-10-28T10:00:00Z"))
+    assert "USE-010" in ids(usage.report(m, []))
+    tr = tmp_path / "old.jsonl"
+    tr.write_text(_usage_rec("2026-10-27T10:00:00Z", "a", 1), encoding="utf-8")   # before the task
+    res = usage.report(m, [str(tr)])
+    assert "USE-001" in ids(res) and res.status != "PASS"
+    monkeypatch.delenv("CLAUDECODE")
+    assert "USE-006" in ids(usage.report(m, []))
+
+
+def test_usage_per_subagent_and_context_caps(tmp_path):
+    tr = tmp_path / "s.jsonl"
+    tr.write_text(_usage_rec("2026-10-28T10:01:00Z", "a", 500), encoding="utf-8")
+    sub = tmp_path / "s" / "subagents"
+    sub.mkdir(parents=True)
+    (sub / "agent-x.jsonl").write_text("\n".join(_usage_rec(f"2026-10-28T10:0{i}:00Z", f"x{i}", 900) for i in range(2, 5)),
+                                       encoding="utf-8")
+    d = doc(started_at="2026-10-28T10:00:00Z",
+            usage={"budget": {"per_subagent": 1000, "context_warn": 800}})
+    m = write(tmp_path, d)
+    res = usage.report(m, [str(tr)])
+    msgs = [f.message for f in res.findings if f.rule_id in ("USE-011", "USE-012")]
+    assert any("agent-x" in s for s in msgs) and not any(s.startswith("main") for s in msgs)
+    data = json.loads((tmp_path / "usage.json").read_text())
+    assert data["by_agent"]["agent-x"]["peak_context"] == 901 and "By agent" in (tmp_path / "usage.md").read_text()
+
+
 def test_usage_packet_dump_blocks(tmp_path):
     d = doc(started_at="2026-10-28T10:00:00Z")
     m = write(tmp_path, d)

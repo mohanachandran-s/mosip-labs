@@ -15,6 +15,8 @@ hot_states:
   FRESH_CONTEXT_REVIEW: 2500000
   SYSTEM_TEST_EXECUTION: 1500000
   PR_CLOSEOUT: 1500000
-packet_max_chars: 20000    # specialist context packet on disk (tasks/<id>/packets)
+per_subagent: 1500000      # one subagent run (USE-011). KM-COV-001: 8 testcase-designers at 2.3M-11.7M each
+context_warn: 150000       # peak context of one call, orchestrator or subagent (USE-012): compact / split
+packet_max_chars: 20000   # specialist context packet on disk (tasks/<id>/packets)
 clip_max_chars: 4000       # crewline clip / run digest (the agent reads this, never the raw log)
 read_max_bytes: 131072     # GRD-008: Read of a file larger than this is denied (Grep / clip instead)

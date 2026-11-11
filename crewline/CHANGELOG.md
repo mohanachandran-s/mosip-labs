@@ -9,6 +9,20 @@ because Claude Code updates an installed plugin only when that version changes. 
   changed for them.
 - **MAJOR**: a change that can break a task in progress (state machine, manifest schema). Finish or restart open tasks.
 
+## 0.8.0
+Token cost. KM-COV-001 (keymanager coverage matrices) spent 94M tokens against the 8M per-task budget and the budget never
+stopped it. Stricter for tasks in progress: USE-001 is now a BLOCK, and USE-010/011 are new BLOCKs.
+- **Meter was blind:** `crewline usage` was run without `--transcript`, counted 0 calls and passed. It now finds the Claude
+  Code transcripts of the clone and its worktrees by itself. Transcripts with no call in the task window BLOCK (USE-001);
+  a Claude session with no transcript found BLOCKs (USE-010). Cursor without a transcript is unchanged (USE-006).
+- **Per-subagent cap:** `per_subagent` (1.5M) BLOCKs one subagent run over it (USE-011); `context_warn` (150k) warns when a
+  call's context passes it, for the orchestrator or a subagent (USE-012). `usage.md` gains a By agent table with peak context.
+- **testcase-designer** runs on `model: sonnet`, reads `packets/FACTS.md` instead of re-reading the service source, does at
+  most 4 matrix files per run, appends rows instead of rewriting tables, and stops at ~120k context.
+- **Orchestrator** (rule 14a): facts packet before many-file batches, at most 2 designers at once, a fresh run with a packet
+  instead of `SendMessage` to a large subagent, `/compact` or `crewline resume` on USE-012, and `crewline usage` after
+  every subagent hand-back.
+
 ## 0.7.4
 The rest of what PP-PYSDK found. Stricter rules for tasks in progress: REQ-005/006, PKT-005, MAN-019, CIC-001; DCV-005 can block.
 Closes mosip/mosip-labs#117, #118, #119, #120, #121, #122.

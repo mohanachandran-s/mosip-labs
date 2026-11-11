@@ -121,7 +121,8 @@ records decisions the team has already made and paid for.
 35. **Defect reports are secret-scanned.** APPLICATION/SECURITY defects need `report_path`; `crewline defect-reports`
     blocks a dump that contains a secret. Values are never printed.
 36. **Token budget is a stop, not a report.** `crewline usage` against `core/usage-budget.yaml` FAILs the `token_budget`
-    gate when the task or a state exceeds the cap (USE-003/004). WAITING_FOR_USER: continue with an exception, split,
+    gate when the task, a state or one subagent exceeds the cap (USE-003/004/011). The meter finds the Claude
+    transcript itself; a blind meter on Claude is a BLOCK, not a pass (USE-001/010). WAITING_FOR_USER: continue with an exception, split,
     or abort. Never poll; never paste reports; never re-load core on every turn. Cursor cannot meter the API: the
     adapter fire-break is the control there (USE-006). `manifest --apply` stamps a `usage_mark`; a hop without one
     fails USE-009.
