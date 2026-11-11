@@ -19,8 +19,9 @@
   TSK-008  activate / deactivate: pin the active task in .crewline-work/active-task
   TSK-009  crewline resume: hand-over generated from the manifest (handover.py)
   TSK-010  worktree: create the task worktree and enable the plugin in it; context is found, not copied (ADR-0009)
+  TSK-011  new: a --repo is not a git checkout, or no clone at all (the task would land in the plugin cache)   BLOCK
 
-Workspace: CREWLINE_TASKS=<dir>, else <clone>/.crewline-work/tasks/ in a repository with .crewline/, else <core>/tasks/
+Workspace: CREWLINE_TASKS=<dir>, else `new --repo <clone>`, else <clone>/.crewline-work/tasks/ in a repository with .crewline/, else <core>/tasks/
 (see workspace.py).
 """
 from __future__ import annotations
@@ -274,7 +275,8 @@ def _worktree(task_id: str | None, base: str | None, branch: str | None, res: Re
 
 
 def run(action: str, task_id: str | None = None, task_type: str | None = None,
-        out: str | None = None, archive: str | None = None, base: str | None = None, branch: str | None = None) -> Result:
+        out: str | None = None, archive: str | None = None, base: str | None = None, branch: str | None = None,
+        repos: list[str] | None = None) -> Result:
     res = Result("task", inputs={"action": action, "root": str(tasks_root())})
     if action == "list":
         rows = _iter()
@@ -318,13 +320,32 @@ def run(action: str, task_id: str | None = None, task_type: str | None = None,
         if task_type not in KNOWN_TYPES:
             res.add("TSK-002", BLOCK, f"unknown type {task_type!r}: {', '.join(KNOWN_TYPES)}")
             return res.finish()
-        dest = tasks_root() / task_id / "task-manifest.json"
+        clones: list[Path] = []
+        for r in repos or []:
+            top = gitio.git(Path(r), "rev-parse", "--show-toplevel", check=False).strip() if Path(r).is_dir() else ""
+            if not top:
+                res.add("TSK-011", BLOCK, f"--repo {r} is not a git checkout")
+                return res.finish()
+            clones.append(workspace.main_clone(Path(top)))
+        root = (Path(os.environ["CREWLINE_TASKS"]) if os.environ.get("CREWLINE_TASKS")
+                else clones[0] / ".crewline-work" / "tasks" if clones else tasks_root())
+        if not clones and root.resolve() == (CORE / "tasks").resolve() and "cache" in CORE.parts:
+            res.add("TSK-011", BLOCK, "not inside a module clone: the task would land in the plugin cache and be lost on "
+                    "update. Pass --repo <clone> (repeat: first = primary, rest = dependencies) or run from the clone")
+            return res.finish()
+        dest = root / task_id / "task-manifest.json"
         if dest.exists():
             res.add("TSK-002", BLOCK, f"{dest} already exists")
             return res.finish()
+        doc = skeleton(task_id, task_type)
+        if clones:
+            doc["scope"]["module"] = clones[0].name
+            doc["scope"]["repositories"] = [{"name": c.name, "path": c.as_posix(), "role": "primary" if i == 0 else "dependency"}
+                                            for i, c in enumerate(clones)]
+            for c in clones:
+                _exclude(c, [".crewline-work/"])
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(json.dumps(skeleton(task_id, task_type), indent=2, ensure_ascii=False) + "\n",
-                        encoding="utf-8")
+        dest.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         res.add("TSK-004", INFO, f"created {dest} at INTAKE. Conductor: `python -m crewline start --id {task_id}`. "
                 f"Drive states with `python -m crewline manifest {dest} --to <STATE> [--apply]`.")
         res.inputs["manifest"] = str(dest)

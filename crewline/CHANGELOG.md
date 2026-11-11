@@ -22,6 +22,10 @@ stopped it. Stricter for tasks in progress: USE-001 is now a BLOCK, and USE-010/
 - **Orchestrator** (rule 14a): facts packet before many-file batches, at most 2 designers at once, a fresh run with a packet
   instead of `SendMessage` to a large subagent, `/compact` or `crewline resume` on USE-012, and `crewline usage` after
   every subagent hand-back.
+- **`task new --repo <clone>`** (repeatable; first = primary): fills `scope.repositories`, excludes `.crewline-work/` in each
+  clone, and keeps the task in the primary clone. From a folder that is not a clone, `task new` used to write the task into
+  the plugin cache (lost on update); it now refuses (TSK-011). Seen in the Java 21/25 migration session, which moved the task by
+  hand and spent five calls reading the schema and hand-writing the manifest.
 
 ## 0.7.4
 The rest of what PP-PYSDK found. Stricter rules for tasks in progress: REQ-005/006, PKT-005, MAN-019, CIC-001; DCV-005 can block.

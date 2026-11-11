@@ -177,6 +177,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--base", dest="task_base", help="for worktree: upstream ref to cut the branch from, e.g. upstream/develop")
     p.add_argument("--branch", dest="task_branch", help="for worktree: new branch name")
     p.add_argument("--type", dest="task_type", help="for `new`: feature, bug-fix, ...")
+    p.add_argument("--repo", dest="task_repos", action="append", default=[],
+                   help="for `new`: a clone the task changes (repeat; first = primary). Fills scope.repositories, "
+                        "keeps the task in <first clone>/.crewline-work/tasks")
     p.add_argument("--out", dest="task_out", help="for export: directory or .zip")
     p.add_argument("--from", dest="task_from", help="for import: directory or .zip")
     p = sub.add_parser("status", help="state, repair attempts left, legal moves, open approvals")
@@ -333,7 +336,7 @@ def main(argv: list[str] | None = None) -> int:
             res = task.run("start", a.task_id, a.task_type)
         elif a.cmd == "task":
             res = task.run(a.action, a.task_id, a.task_type, getattr(a, "task_out", None), getattr(a, "task_from", None),
-                           a.task_base, a.task_branch)
+                           a.task_base, a.task_branch, a.task_repos)
         elif a.cmd in ("status", "review", "approval", "limitation"):
             from . import records
             path = _task_manifest(getattr(a, "manifest", None), a.task_id)

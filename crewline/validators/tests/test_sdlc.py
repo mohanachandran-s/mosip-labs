@@ -1336,6 +1336,28 @@ def test_cold_start_kit_passes():
     assert "CS-004" in ids(res)
 
 
+def test_task_new_with_repos_and_no_plugin_cache(tmp_path, monkeypatch):
+    from crewline import task
+    monkeypatch.delenv("CREWLINE_TASKS", raising=False)
+    repos = []
+    for n in ("commons", "masterdata"):
+        r = tmp_path / n
+        subprocess.run(["git", "init", "-q", str(r)], check=True)
+        repos.append(str(r))
+    res = task.run("new", "J25", "dependency-upgrade", repos=repos)
+    assert res.status == "PASS", res.to_text()
+    m = Path(res.inputs["manifest"])
+    assert m.parent.parent == (tmp_path / "commons" / ".crewline-work" / "tasks").resolve() or \
+        m.parent.parent.resolve() == (tmp_path / "commons" / ".crewline-work" / "tasks").resolve()
+    scope = json.loads(m.read_text(encoding="utf-8"))["scope"]
+    assert [r["role"] for r in scope["repositories"]] == ["primary", "dependency"] and scope["module"] == "commons"
+    assert ".crewline-work/" in (tmp_path / "masterdata" / ".git" / "info" / "exclude").read_text()
+    assert "TSK-011" in ids(task.run("new", "J26", "feature", repos=[str(tmp_path / "nope")]))
+    monkeypatch.setattr(task, "CORE", tmp_path / "plugins" / "cache" / "crewline")
+    monkeypatch.setattr(task, "tasks_root", lambda: tmp_path / "plugins" / "cache" / "crewline" / "tasks")
+    assert "TSK-011" in ids(task.run("new", "J27", "feature"))
+
+
 def test_task_queue_new_status_resume(tmp_path, monkeypatch):
     from crewline import task
     monkeypatch.setenv("CREWLINE_TASKS", str(tmp_path))
