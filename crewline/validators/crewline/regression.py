@@ -8,6 +8,13 @@
   REG-006  case FAILED on base and passes on branch (fixed)                       INFO
 
   REG-009  a TestRig run (module + language) present on base has no full report on the branch BLOCK
+  REG-010  --baseline-from-user: no human approver named (BLOCK), or a base report older than --max-age-days (WARN)
+
+Reusing a base run (`--baseline-from-user --approver <who>`): when the user already has a full base run on the same
+environment (e.g. the module's last released-run `testng-report/`), point --baseline at it instead of building and running
+the base again. Pairing by `<env>-<module>-<lang>` refuses a base from another environment (REG-009). Only a report gives
+per-test PASS->FAIL; bare totals ("945 run, 937 passed") cannot, so totals alone go through
+`crewline regression-decision --waive`, not here.
 
 Several TestRig full reports in one folder (one per language: `...-masterdata-eng-<date>-full-report...`) are paired by
 the name before the date, newest per name, and every pair is compared; a single report compares as before.
@@ -51,6 +58,29 @@ def pairs(baseline: str, candidate: str) -> list[tuple[str, Path | None, Path | 
     return [(k, base.get(k), cand.get(k)) for k in sorted(set(base) | set(cand))]
 
 
+REPORT_DATE = re.compile(r"-(\d{4}-\d{2}-\d{2})_\d{2}-\d{2}")
+
+
+def user_baseline(res: Result, approver: str | None, max_age_days: float = 14) -> None:
+    """Record that the base report came from the user, and check it is attributed and recent."""
+    from datetime import datetime, timezone
+    from .records import _is_agent
+    res.inputs["baseline_source"] = "user"
+    if not approver or _is_agent(approver):
+        res.add("REG-010", BLOCK, "a reused base report needs the person who supplied it (--approver <who>, not an agent)")
+        return
+    res.inputs["baseline_approver"] = approver
+    now = datetime.now(timezone.utc).date()
+    for f in res.inputs.get("baseline_files") or []:
+        m = REPORT_DATE.search(Path(f).name)
+        when = (datetime.strptime(m.group(1), "%Y-%m-%d").date() if m
+                else datetime.fromtimestamp(Path(f).stat().st_mtime, timezone.utc).date())
+        age = (now - when).days
+        if age > max_age_days:
+            res.add("REG-010", WARN, f"base report {Path(f).name} is {age} days old (> {max_age_days:g}): the environment "
+                    "or test data may have moved since; a fresh base run is safer", evidence=Path(f).name)
+
+
 def compared_files(path: str | Path) -> list[Path]:
     """The files a single comparison read: the full report, the cucumber.json, or the JUnit XMLs."""
     report = find_full_report(path)
@@ -74,9 +104,11 @@ def snapshot(res: Result, out: str | Path) -> tuple[Path, Path]:
     return dirs["base"], dirs["branch"]
 
 
-def run(baseline: str, candidate: str, allow_fail: list[str] | None = None) -> Result:
+def run(baseline: str, candidate: str, allow_fail: list[str] | dict[str, str] | None = None) -> Result:
+    """`allow_fail`: ids whose break is covered (a list: by a quality-gate exception; a dict: id -> who approved)."""
     res = Result("full-regression", inputs={"baseline": str(Path(baseline).resolve()), "candidate": str(Path(candidate).resolve())})
-    allow = {a.lower() for a in (allow_fail or [])}
+    allow = ({k.lower(): v for k, v in allow_fail.items()} if isinstance(allow_fail, dict)
+             else {a.lower(): "quality-gate exception" for a in (allow_fail or [])})
     paired = pairs(baseline, candidate)
     if paired:
         res.inputs["pairs"] = []
@@ -116,7 +148,7 @@ def run(baseline: str, candidate: str, allow_fail: list[str] | None = None) -> R
     return res.finish()
 
 
-def _compare(res: Result, base: dict, cand: dict, allow: set[str], tag: str = "") -> None:
+def _compare(res: Result, base: dict, cand: dict, allow: dict[str, str], tag: str = "") -> None:
     for uid, now in sorted(cand.items()):
         was = base.get(uid)
         covered = uid.lower() in allow
@@ -136,7 +168,7 @@ def _compare(res: Result, base: dict, cand: dict, allow: set[str], tag: str = ""
         else:
             continue
         if covered:
-            f.approved_by = "quality-gate exception"
+            f.approved_by = allow[uid.lower()]
     for uid in sorted(set(base) - set(cand)):
         res.add("REG-004", WARN, f"{tag}{uid}: on base ({base[uid]}) but missing from the branch run", evidence=uid)
 

@@ -1154,6 +1154,24 @@
         "no_follow_up": {
           "type": "string",
           "description": "for a gate exception: why none is needed, as the user accepted it"
+        },
+        "test_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "regression_deferred: the cases this one approval covers (never the whole gate)"
+        },
+        "bug": {
+          "type": "string",
+          "description": "regression_deferred: the raised bug the cases are deferred to"
+        },
+        "kind": {
+          "enum": [
+            "no_code_change",
+            "user_waiver"
+          ],
+          "description": "full_regression_waiver: why it was not run"
         }
       }
     }

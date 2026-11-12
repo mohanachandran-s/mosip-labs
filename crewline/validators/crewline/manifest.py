@@ -31,6 +31,9 @@
   TRN-004  leaving a state on the main line while a gate that state owns (and a later entry guard needs) is not met:
            checked when its own state ends, not states later (e.g. plan_readiness leaving IMPLEMENTATION_PLAN)
   TRN-005  SYSTEM_TEST_EXECUTION -> FAILURE_TRIAGE while full_regression is PASS: no PASS->FAIL to triage
+  TRN-006  moving into repair (QUALITY_GATE -> IMPLEMENTATION, SYSTEM_TEST_EXECUTION -> FAILURE_TRIAGE) while
+           full_regression is FAIL without the user's one `regression_fix` approval: ask once - fix, or raise a bug and
+           defer (`crewline regression-decision --fix | --defer --bug <KEY>`); the move consumes the approval
 Entering FAILURE_TRIAGE clears repair.classification: each triage classifies its own failure.
 """
 from __future__ import annotations
@@ -53,6 +56,7 @@ APPROVAL_FIELDS = ("approver", "reason", "scope", "timestamp")
 TIERS = ["L0", "L1", "L2", "L3"]
 DEFAULT_TYPE = "test-automation"     # manifests from the SDET assistant era carry no task_type
 NEVER_WAIVABLE = {"secrets", "requirement_clarity", "requirement_fit"}
+GUARD_WAIVABLE = {"full_regression"}     # an entry guard on these accepts an attributed whole-gate exception
 TRACKER_KEY = {
     "github": re.compile(r"^([\w.-]+/[\w.-]+)?#\d+$"),       # owner/repo#12, or #12 on the primary upstream repo
     "jira": re.compile(r"^[A-Z][A-Z0-9]+-\d+$"),             # INJIVER-1386
@@ -152,6 +156,10 @@ class Ctx:
         if gate in self.tpl.get("not_applicable_gates", {}) and gate not in self.tpl.get("required_gates", []) \
                 and gate not in NEVER_WAIVABLE:
             return True, ""                  # the template states why this type has nothing for the gate to measure
+        if "gate" in guard and gate in GUARD_WAIVABLE and any(
+                e.get("gate") == gate and not e.get("test_ids") and all(e.get(k) for k in APPROVAL_FIELDS)
+                for e in self.doc.get("exceptions") or []):
+            return True, ""                  # an attributed waiver of the whole gate (regression-decision --waive)
         actual = _gate(doc, guard["gate"]) if "gate" in guard else _get(doc, guard["path"])
         label = f"gate {guard['gate']}" if "gate" in guard else guard["path"]
         for op, want in guard.items():
@@ -462,7 +470,8 @@ def _version_drift(doc: dict, res: Result) -> None:
 
 
 def _required_gates(ctx: Ctx, res: Result, rule: str = "MAN-012") -> None:
-    excepted = {e.get("gate") for e in ctx.doc.get("exceptions", []) if all(e.get(k) for k in APPROVAL_FIELDS)}
+    excepted = {e.get("gate") for e in ctx.doc.get("exceptions", [])
+                if all(e.get(k) for k in APPROVAL_FIELDS) and not e.get("test_ids")}      # a per-test deferral is not the gate
     strict = set(ctx.tpl.get("no_silent_na", []))
     for name in ctx.tpl.get("required_gates", []):
         status = _gate(ctx.doc, name)
@@ -538,6 +547,18 @@ def _guards_for(ctx: Ctx, src: str, to_state: str) -> list[dict]:
     return guards
 
 
+REPAIR_MOVES = {("QUALITY_GATE", "IMPLEMENTATION"), ("SYSTEM_TEST_EXECUTION", "FAILURE_TRIAGE")}
+
+
+def _regression_fix_needed(doc: dict, src: str | None, to_state: str) -> bool:
+    return (src, to_state) in REPAIR_MOVES and _gate(doc, "full_regression") == "FAIL"
+
+
+def _open_approval(doc: dict, action: str) -> dict | None:
+    return next((a for a in doc.get("approvals", []) if a.get("action") == action and not a.get("consumed_by")
+                 and all(a.get(k) for k in APPROVAL_FIELDS)), None)
+
+
 def _own_gates_on_exit(ctx: Ctx, src: str, to_state: str, guards: list[dict], res: Result) -> None:
     """TRN-004: a gate owned by `src` that a later state's entry guard needs is checked when `src` ends."""
     if src not in ctx.path or to_state not in ctx.path or ctx.path.index(to_state) != ctx.path.index(src) + 1:
@@ -592,6 +613,10 @@ def transition(manifest_path: str, to_state: str) -> Result:
     if src == "SYSTEM_TEST_EXECUTION" and to_state == "FAILURE_TRIAGE" and _gate(doc, "full_regression") == "PASS":
         res.add("TRN-005", BLOCK, "full_regression is PASS (no PASS->FAIL): there is nothing to triage",
                 remediation="move to QUALITY_GATE; record a real failure (full_regression FAIL) before triage")
+    if _regression_fix_needed(doc, src, to_state) and not _open_approval(doc, "regression_fix"):
+        res.add("TRN-006", BLOCK, "full_regression found new breaks: ask the user once whether to fix them or raise a bug "
+                "and defer", remediation="crewline regression-decision --manifest <m> --fix --approver <who> --reason <why>,"
+                " or --defer --bug <KEY> --record <evidence/full-regression.json> ...")
     _tracker_guard(ctx, src, to_state, res)
     _subtask_guard(ctx, src, to_state, res)
     _before_final_report(ctx, manifest_path, to_state, res)
@@ -636,6 +661,9 @@ def apply(manifest_path: str, to_state: str, note: str = "") -> Result:
     else:
         guards = _guards_for(ctx, src, to_state)
     stamp = f"{src}->{to_state}@{at}"
+    fix = _open_approval(doc, "regression_fix") if _regression_fix_needed(doc, src, to_state) else None
+    if fix:
+        fix["consumed_by"] = stamp
     for action in {g["approval"] for g in guards if "approval" in g}:
         for a in doc.get("approvals", []):          # consume the oldest unconsumed matching approval
             if a.get("action") == action and not a.get("consumed_by"):

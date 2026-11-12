@@ -52,6 +52,30 @@ Efficiency findings from MOSIP-45750 (Java 21 -> 25 upgrade, run on 0.7.2). Stri
   FAILURE_TRIAGE is refused while full_regression is PASS (TRN-005), and entering FAILURE_TRIAGE clears
   `repair.classification`.
 
+Regression decisions, kept reports, and KM-COV-001 (session review). Stricter for tasks in progress: TRN-006, EVD-005.
+- **Full regression, one decision each (`crewline regression-decision`):** `--waive` records an attributed exception
+  instead of a run: `no_code_change` when the diff (`--repo/--base`) has only docs / coverage / markdown, otherwise
+  `user_waiver`. After base and branch ran with new breaks, the user is asked once: `--fix` records `regression_fix`,
+  which the move into repair needs (TRN-006, consumed by it); `--defer --bug <KEY>` covers every new break in the record
+  with ONE exception and adds a raised defect, and `regression --manifest <m>` re-scores them APPROVED. A
+  CODE_UNDER_CHANGE break is never deferred (RGD-003); a per-test deferral never waives the whole gate. KM-COV-001
+  recorded 23 separate exceptions for one decision.
+- **Reuse the user's base run:** `regression --baseline <existing report> --baseline-from-user --approver <who>` skips
+  the base build and run when a recent full run on the same environment exists; REG-010 needs the approver and warns
+  past `--max-age-days` (14). Pairing by `<env>-<module>-<lang>` refuses a base from another environment.
+- **Run reports kept with the task:** `crewline run` copies `--report` and every report the run wrote (TestRig
+  `testng-report/`, Surefire/Failsafe XML, cucumber.json) to `<task>/evidence/reports/<record>/` and lists them in the
+  record (EVD-006); EVD-004 accepts the kept copy once the worktree is gone.
+- **`crewline run --timeout <min> --fail-on <regex>`:** stops a run that hangs (KM-COV-001: a TestRig 401 at login hung the
+  base run for 38 minutes) and records why (EVD-005).
+- **Guard false positives:** `git commit` / `push --force` inside a quoted argument or heredoc (a manifest note, a commit
+  message) is no longer read as a git command (GRD-005 / GRD-002 in KM-COV-001); a nested `bash -c` still is. Writes to
+  a path in no git checkout (agent memory, an 8.3 temp scratchpad) are not repository changes (GRD-004).
+- **`crewline creds merge --from <values> --into <props>` / `restore`:** env values into a worktree config by key, names
+  only in the output, tracked file marked skip-worktree, original kept and restored (finding #19).
+- **Orchestrator 14b:** a re-review checks the previous findings and the diff since; after two rounds with new findings
+  the user decides (KM-COV-001 ran five fresh-context rounds).
+
 ## 0.7.4
 The rest of what PP-PYSDK found. Stricter rules for tasks in progress: REQ-005/006, PKT-005, MAN-019, CIC-001; DCV-005 can block.
 Closes mosip/mosip-labs#117, #118, #119, #120, #121, #122.

@@ -88,7 +88,7 @@ def _require_reproduction(manifest_path: str, res: Result) -> None:
 
 
 def _has_exception(doc: dict, gate: str) -> bool:
-    return any(e.get("gate") == gate and all(e.get(k) for k in APPROVAL_FIELDS)
+    return any(e.get("gate") == gate and all(e.get(k) for k in APPROVAL_FIELDS) and not e.get("test_ids")
                for e in doc.get("exceptions") or [])
 
 

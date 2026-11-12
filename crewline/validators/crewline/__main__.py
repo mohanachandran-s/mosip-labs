@@ -55,6 +55,7 @@ Exit code 0 PASS, 1 FAIL, 2 NOT_RUN. Add --json for machine-readable output.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 import sys
 
@@ -139,11 +140,41 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--candidate", required=True, help="same, for the branch run")
     p.add_argument("--allow-fail", action="append", default=[], help="test id with an attributed gate exception")
     p.add_argument("--out", help="also write the result JSON here (evidence/full-regression[-<suite>].json, REG-007)")
+    p.add_argument("--baseline-from-user", dest="baseline_from_user", action="store_true",
+                   help="--baseline is a run the user already has (same env); saves the base run (REG-010)")
+    p.add_argument("--approver", dest="reg_approver", help="with --baseline-from-user: who supplied the base report")
+    p.add_argument("--max-age-days", dest="max_age_days", type=float, default=14)
+    p.add_argument("--manifest", dest="reg_manifest",
+                   help="honour the task's regression deferrals (regression-decision --defer) as approved")
+    p = sub.add_parser("creds", help="merge the user's env values into a worktree config for a run (keys only), and restore it")
+    p.add_argument("creds_action", choices=["merge", "restore"])
+    p.add_argument("--from", dest="creds_from", help="for merge: the values file (key=value or key: value)")
+    p.add_argument("--into", dest="creds_into", action="append", default=[], required=True,
+                   help="the worktree's config file (repeat for base and branch)")
+    p = sub.add_parser("regression-decision", help="the user's one decision on the full regression: waive, fix, or defer to a bug")
+    p.add_argument("--manifest", required=True)
+    mode = p.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--waive", dest="rgd_mode", action="store_const", const="waive",
+                      help="skip the full regression (no code change, or the user's explicit waiver)")
+    mode.add_argument("--fix", dest="rgd_mode", action="store_const", const="fix", help="approve fixing the new breaks")
+    mode.add_argument("--defer", dest="rgd_mode", action="store_const", const="defer",
+                      help="raise a bug and defer every new break in --record with one approval")
+    p.add_argument("--approver", help="the person who decided (never an agent)")
+    p.add_argument("--reason")
+    p.add_argument("--repo", dest="rgd_repo", help="for --waive: check the diff (no code change)")
+    p.add_argument("--base", dest="rgd_base", help="for --waive: the base ref of the diff")
+    p.add_argument("--bug", help="for --defer: the Jira key / GitHub issue already raised")
+    p.add_argument("--record", help="for --defer: evidence/full-regression*.json with the new breaks")
+    p.add_argument("--class", dest="rgd_class", default="APPLICATION", help="for --defer: defect class (not CODE_UNDER_CHANGE)")
+    p.add_argument("--follow-up", dest="rgd_follow_up", help="for --waive: ticket that closes what was waived")
     p = sub.add_parser("run")
     p.add_argument("--repo", required=True); p.add_argument("--out", required=True)
     p.add_argument("--report"); p.add_argument("--cwd")
     p.add_argument("--env", action="append", default=[], metavar="KEY=VALUE",
                    help="set for this run only, e.g. JAVA_HOME=<jdk> (its bin/ leads PATH); the record keeps the names")
+    p.add_argument("--timeout", type=float, metavar="MINUTES", help="stop the run after this many minutes (EVD-005)")
+    p.add_argument("--fail-on", dest="fail_on", metavar="REGEX",
+                   help="stop as soon as the log matches, e.g. 'HTTP 401|NotAuthorizedException' for a TestRig login")
     p = sub.add_parser("clip")
     p.add_argument("--file", help="log path, or - for stdin (omit when a command follows --)")
     p.add_argument("--max-chars", type=int, dest="max_chars")
@@ -284,7 +315,15 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 res = scope.run(Module(a.module_root, load_profile(module_profile(a.module_root, a.profile))), a.ref)
         elif a.cmd == "regression":
-            res = regression.run(a.baseline, a.candidate, a.allow_fail)
+            allow = dict.fromkeys(a.allow_fail, "quality-gate exception")
+            if a.reg_manifest:
+                from . import regression_decision
+                allow.update(regression_decision.deferred_tests(json.loads(Path(a.reg_manifest).read_text(encoding="utf-8"))))
+            res = regression.run(a.baseline, a.candidate, allow)
+            if a.baseline_from_user and res.status != "NOT_RUN":
+                regression.user_baseline(res, a.reg_approver, a.max_age_days)
+                res.status, res.summary = "PASS", ""
+                res = res.finish()
             if a.out:
                 from . import systest
                 base_copy, cand_copy = (regression.snapshot(res, a.out) if res.status != "NOT_RUN"   # the base checkout
@@ -295,13 +334,22 @@ def main(argv: list[str] | None = None) -> int:
                                   worktree_digest=systest.repo_digest(a.candidate))
                 Path(a.out).parent.mkdir(parents=True, exist_ok=True)
                 Path(a.out).write_text(res.to_json(), encoding="utf-8")
+        elif a.cmd == "creds":
+            from . import creds
+            res = (creds.merge(a.creds_from, a.creds_into) if a.creds_action == "merge" and a.creds_from
+                   else creds.restore(a.creds_into) if a.creds_action == "restore"
+                   else Result.not_run("creds", "merge needs --from <values file>"))
+        elif a.cmd == "regression-decision":
+            from . import regression_decision
+            res = regression_decision.run(a.manifest, a.rgd_mode, a.approver, a.reason, a.rgd_repo, a.rgd_base, a.bug,
+                                          a.record, a.rgd_class, a.rgd_follow_up)
         elif a.cmd == "coverage":
             if not pack.uses_coverage_cli():
                 res = Result.not_run("coverage", f"pack {pack.active_id()} has sdet.coverage_cli=false")
             else:
                 res = coverage.run(a.commons_dir, a.module_root, a.module_code, a.offline)
         elif a.cmd == "run":
-            res = evidence.capture(a.repo, a.out, command, a.report, a.cwd, a.env)
+            res = evidence.capture(a.repo, a.out, command, a.report, a.cwd, a.env, a.timeout, a.fail_on)
         elif a.cmd == "clip":
             if command:
                 res = clip.run_command(command, a.max_chars)

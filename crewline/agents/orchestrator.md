@@ -107,6 +107,21 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
     state without the file fails SYS-001; without a run of a suite the module declares in `.crewline/module.yaml` it
     fails SYS-002, and a change to a UI project without a UI rig run fails SYS-003. QUALITY_GATE -> COMMIT_PR needs
     `crewline regression --out <task>/evidence/full-regression[-<suite>].json` comparing those suites (REG-007/008).
+    Every suite run goes through `crewline run ... --timeout <min> --fail-on '<login failure regex>'` (a TestRig whose
+    login gets a 401 hangs; stop it, do not wait). The run keeps its reports in `<task>/evidence/reports/<record>/`:
+    point the user there, never at the worktree's `testng-report/`.
+    Before running the base, ask once: "do you have a recent full run of the base on this environment?". If yes, use
+    that report: `crewline regression --baseline <their report dir> --baseline-from-user --approver <who> ...` (REG-010
+    warns past 14 days); only the branch is run. Totals alone cannot show which case broke: offer --waive instead.
+    Regression decisions are ONE question to the user, each recorded with `crewline regression-decision`:
+    - not running it (the change has no code, or the user says so): `--waive --approver <who> --reason <why>
+      [--repo <dir> --base <ref>]`; with the diff given, a docs/coverage-only change is recorded as no_code_change.
+    - new breaks after base and branch ran: ask once, "fix them, or raise a bug and continue?".
+      Fix: `--fix` (TRN-006 needs it before QUALITY_GATE -> IMPLEMENTATION / SYSTEM_TEST_EXECUTION -> FAILURE_TRIAGE).
+      Raise and continue: the defect-analyst raises the bug (one ticket for the group, approval
+      create_application_bug), then `--defer --bug <KEY> --record <full-regression.json> [--class ENVIRONMENT]` covers
+      every break with that one approval; re-run `crewline regression ... --manifest <m> --out <same record>`.
+      Never one exception per failing test.
     Each specialist state (requirements, acceptance, impact, testcase design/review) is delegated: its agent writes
     `packets/<STATE>.md` with `agent:` and `context_id:`; the orchestrator never signs one (PKT-004). Before QUALITY_GATE: `python -m crewline defect-reports --manifest <m>`.
 6d. After installing or upgrading Crewline: `python -m crewline adapter-check --platform <p> --target <workspace> --sync`.
@@ -145,6 +160,10 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
     designers at once: parallel runs do not use fewer tokens and they hit the plan's usage limit together, stall,
     and re-write their whole context when resumed. A follow-up to a finished subagent past ~120k context is a fresh
     run with a packet, not a `SendMessage` (each message re-reads all of it).
+14b. **Review rounds:** a re-review after fixes gets the previous findings and the diff since that review, and checks
+    only that each finding is fixed and the fix broke nothing near it; it does not re-read the whole change. After the
+    second round with new findings, stop and ask the user: fix them now, or record the rest as known limitations.
+    (KM-COV-001 ran five fresh-context rounds, each re-reading the matrices.)
 
 ## Must not
 

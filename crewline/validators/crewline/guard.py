@@ -101,12 +101,25 @@ def _crewline_wrapped(low: str) -> bool:
     return bool(re.search(r"crewline(\.py)?(\s+\S+){0,8}\s+(run|clip)\b", low))
 
 
+NESTED_SHELL = re.compile(r"(^|[\s;&|])(bash|sh|zsh|pwsh|powershell|cmd)(\.exe)?\s+(-\w*c|/c|-command)\b|\beval\b", re.I)
+HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n.*?\n\s*\2\b", re.S)
+QUOTED = re.compile(r"""'[^']*'|"(?:\\.|[^"\\])*\"""")
+
+
+def _code_only(text: str) -> str:
+    """The command without quoted arguments and heredoc bodies, so a note or a message that mentions `git commit` or
+    `push --force` is not mistaken for one. A nested shell (`bash -c "..."`, eval) keeps its text: that is code."""
+    if NESTED_SHELL.search(text):
+        return text
+    return QUOTED.sub("''", HEREDOC.sub(lambda m: "<<" + m.group(2), text))
+
+
 def classify_shell(command: str) -> str:
     """Map a shell command to a guard action: deny_*, commit, push, pr, other."""
     text = (command or "").strip()
     if not text:
         return "other"
-    low = text.lower()
+    low = _code_only(text).lower()
     if re.search(r"(^|\s)--no-verify(\s|$)", low):
         return "deny_hooks"
     if not _crewline_wrapped(low):
@@ -114,8 +127,8 @@ def classify_shell(command: str) -> str:
             return "deny_dump"
         if RAW_SUITE.search(low):
             return "deny_raw_suite"
-    git = bool(re.search(r"(^|[\s;&|])git(\.exe)?\s", low + " ") or low.startswith("git ") or low.startswith("git.exe "))
-    if git and re.search(r"\bpush\b", low) and re.search(r"(^|\s)(-f|--force|--force-with-lease)(\s|$)", low):
+    git = bool(re.search(r"(^|[\s;&|'\"(])git(\.exe)?\s", low + " ") or low.startswith("git ") or low.startswith("git.exe "))
+    if git and re.search(r"\bpush\b", low) and re.search(r"(^|\s)(-f|--force|--force-with-lease)(=\S*)?(\s|$|['\");])", low):
         return "deny_force"
     if git and re.search(r"\breset\b", low) and re.search(r"--hard", low):
         return "deny_destructive"
@@ -297,6 +310,24 @@ def _rel_repo_path(path: str, cwd: str | None = None) -> str:
     return p.name
 
 
+def _outside_repos(path: str, cwd: str | None) -> bool:
+    """An absolute path in no git checkout (agent memory, a scratchpad under an 8.3 temp name, a download folder) is not
+    a repository change, so scope.approved_paths does not apply. Paths in a checkout, or relative ones, stay guarded."""
+    p = Path(path)
+    if not p.is_absolute():
+        return False
+    if cwd:
+        try:
+            if p.resolve().is_relative_to(Path(cwd).resolve()) or p.is_relative_to(Path(cwd)):
+                return False                          # the session's own folder stays guarded, git or not
+        except OSError:
+            return False
+    start = p.parent
+    while not start.is_dir() and start != start.parent:
+        start = start.parent
+    return _git_top(start) is None
+
+
 def _git_top(start: Path) -> Path | None:
     try:
         r = subprocess.run(["git", "-C", str(start), "rev-parse", "--show-toplevel"], capture_output=True, text=True,
@@ -313,7 +344,7 @@ def check_write(path: str, manifest_path: str | None = None, cwd: str | None = N
 def _check_write(path: str, manifest_path: str | None = None, cwd: str | None = None) -> Result:
     res = Result("guard", inputs={"path": path, "manifest": manifest_path or ""})
     rel = _rel_repo_path(path, cwd)
-    if rel == "" or _scratch(path, cwd):
+    if rel == "" or _scratch(path, cwd) or _outside_repos(path, cwd):
         return res.finish()
     if not manifest_path:
         return res.finish()  # drafting without a task is allowed; shipping is not
