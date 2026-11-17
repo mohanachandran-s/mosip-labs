@@ -21,7 +21,49 @@ commit/push, so a chat cannot pass for a done SDLC. [Why Crewline on Cursor or C
 | Design | `../AI_Engineering_Agent_Full_SDLC_Implementation_Blueprint_v2.1.html` (authoritative) and `../AI_Engineering_Agent_Full_SDLC_Updated_Plan_v1.3.html` |
 | Lineage | Copied from the SDET Architect Assistant 0.2.0. Its proven workflow is the `test-automation` task type and the `agents/qa/` specialty |
 | Pilots | **PILOT-001** (test automation): [mosip/pre-registration#1088](https://github.com/mosip/pre-registration/pull/1088) · **PILOT-002** (bug fix MOSIP-38854): [mosip/pre-registration#1089](https://github.com/mosip/pre-registration/pull/1089) |
-| Health | 203 validator acceptance tests; evaluation scenarios EV-01..59 (`python -m crewline evals --pack frozen`) |
+| Health | 287 validator acceptance tests; evaluation scenarios EV-01..70 (`python -m crewline evals --pack frozen`) |
+
+### What's new in 0.8.0
+
+```mermaid
+flowchart LR
+    classDef cost fill:#fde2e1,stroke:#c0392b,color:#000
+    classDef run fill:#e3f2fd,stroke:#1565c0,color:#000
+    classDef decide fill:#e8f5e9,stroke:#2e7d32,color:#000
+    classDef safe fill:#fff8e1,stroke:#f9a825,color:#000
+
+    V(["Crewline 0.8.0"])
+    subgraph C["Token cost"]
+        C1["Meter finds its own transcript<br/>blind meter BLOCKs (USE-001/010)"]
+        C2["Per-subagent cap + context warning<br/>(USE-011/012)"]
+        C3["testcase-designer on Sonnet<br/>facts packet, ≤4 files per run"]
+        C4["Bounded re-reviews (rule 14b)"]
+    end
+    subgraph R["Runs and evidence"]
+        R1["crewline run finds mvn.cmd,<br/>--env JAVA_HOME, records the JDK"]
+        R2["--timeout / --fail-on<br/>stop a hung suite (EVD-005)"]
+        R3["Every report kept in<br/>evidence/reports/ (EVD-006)"]
+        R4["Per-language TestRig pairing<br/>(REG-009)"]
+    end
+    subgraph D["Decisions, one question each"]
+        D1["Waive full regression<br/>no code change / user waiver"]
+        D2["Reuse the user's base run<br/>(REG-010)"]
+        D3["New breaks: fix (TRN-006)<br/>or raise a bug and defer"]
+    end
+    subgraph S["Safer, fewer false stops"]
+        S1["Tasks stay in the clone,<br/>never the plugin cache"]
+        S2["Schema errors all at once<br/>with JSON paths (MAN-001)"]
+        S3["Guard ignores quoted text;<br/>files outside checkouts allowed"]
+        S4["creds merge / restore<br/>keys only, skip-worktree"]
+    end
+    V --> C & R & D & S
+    class C1,C2,C3,C4 cost
+    class R1,R2,R3,R4 run
+    class D1,D2,D3 decide
+    class S1,S2,S3,S4 safe
+```
+
+Details per change: [CHANGELOG.md](CHANGELOG.md#080).
 
 ---
 
@@ -117,8 +159,11 @@ only in repositories that carry a `.crewline/` folder.
 | Check | the first lines of a session say whether Crewline is ACTIVE; `/plugin` lists it as enabled or disabled |
 
 **Work stays with the module:** task records go to `<clone>/.crewline-work/tasks/<task-id>/` and worktrees to
-`<clone>/.crewline-work/worktrees/<task-id>`, excluded from git through `.git/info/exclude`. Validators run as `crewline <command>`
-(the plugin's `bin/` is on the PATH while it is enabled).
+`<clone>/.crewline-work/worktrees/<task-id>`, excluded from git through `.git/info/exclude`. This holds in any git clone,
+onboarded or not; only outside git (or in the Crewline source clone) do tasks fall back to `<core>/tasks`. From a folder
+that holds several clones, name them: `crewline task new --id <ID> --type <type> --repo <primary clone> --repo <dependency>`
+(TSK-011 refuses a task that would land in the plugin cache). Validators run as `crewline <command>` (the plugin's `bin/`
+is on the PATH while it is enabled).
 
 **Updates:** Claude Code keeps an installed copy of Crewline and replaces it only when the plugin version changes.
 - Turn on auto-update for the `mosip-labs` marketplace in `/plugin` (Marketplaces), or update by hand:
@@ -132,6 +177,29 @@ only in repositories that carry a `.crewline/` folder.
 Write/Edit) run `crewline guard`: `git commit` / `git push` / `gh pr create` are denied until the active task's gates pass,
 and force-push, `--no-verify`, hard reset, stash, branch delete, PR merge and production deploy are always denied. In other
 repositories the hooks allow everything; `CREWLINE=off` turns them off for one session.
+
+```mermaid
+flowchart TB
+    classDef deny fill:#fde2e1,stroke:#c0392b,color:#000
+    classDef allow fill:#e8f5e9,stroke:#2e7d32,color:#000
+    classDef gate fill:#e3f2fd,stroke:#1565c0,color:#000
+
+    CALL["Agent tool call<br/>Bash · PowerShell · Write · Edit"] --> HOOK["PreToolUse hook → crewline guard"]
+    HOOK --> KIND{"What is it?"}
+    KIND -->|"shell command"| STRIP["Read the command without quoted<br/>arguments and heredoc bodies<br/>(a note saying 'git commit' is not a commit;<br/>bash -c &quot;...&quot; still counts)"]
+    STRIP --> ALWAYS{"force-push · --no-verify · reset --hard<br/>stash · branch -D · gh pr merge · prod deploy?"}
+    ALWAYS -->|"yes"| D1["DENY GRD-002 / GRD-006"]:::deny
+    ALWAYS -->|"no"| SHIP{"git commit · git push · gh pr create?"}
+    SHIP -->|"no"| A1["ALLOW"]:::allow
+    SHIP -->|"yes"| GATES["Active task at the right state,<br/>its gates pass, commit signed off,<br/>PR title has the tracker key"]:::gate
+    GATES -->|"all hold"| A2["ALLOW"]:::allow
+    GATES -->|"any fails"| D2["DENY GRD-003 / 005 / 009 + the failing gate"]:::deny
+    KIND -->|"file write"| WHERE{"Inside a git checkout<br/>or the session folder?"}
+    WHERE -->|"no: agent memory, temp scratchpad"| A3["ALLOW"]:::allow
+    WHERE -->|"yes"| SCOPE{"Path in scope.approved_paths<br/>(or a scope_change grant)?"}
+    SCOPE -->|"yes"| A4["ALLOW"]:::allow
+    SCOPE -->|"no"| D3["DENY GRD-004"]:::deny
+```
 
 ## Turn Crewline on for a module in Cursor
 
@@ -191,6 +259,7 @@ fails to run (e.g. PyYAML missing), shell and write actions ask the user instead
   inji/inji-verify#2460 (do not open a new PR).` - the agent then works on that PR's branch (orchestrator step 4b).
 
 ## Contents
+- [What's new in 0.8.0](#whats-new-in-080)
 - [Why Crewline on Cursor or Claude](#why-crewline-on-cursor-or-claude)
 - [How you start it (Cursor, Claude or terminal)](#how-you-start-it-cursor-claude-or-terminal)
 1. [What it is (and is not)](#1-what-it-is-and-is-not)
@@ -199,7 +268,7 @@ fails to run (e.g. PyYAML missing), shell and write actions ask the user instead
 4. [Task types](#4-task-types)
 5. [Agents](#5-agents)
 6. [Quality gates](#6-quality-gates)
-7. [Testing model](#7-testing-model)
+7. [Testing model](#7-testing-model) · [SDET in every flow](#71-sdet-in-every-flow) · [Full regression: run, reuse, waive, fix or defer](#72-full-regression-run-reuse-waive-fix-or-defer)
 8. [Failures, repairs and escalation](#8-failures-repairs-and-escalation)
 9. [Git, PR and review comments](#9-git-pr-and-review-comments)
 10. [Governance: tiers, approvals, independence](#10-governance-tiers-approvals-independence)
@@ -403,6 +472,14 @@ Dashed arrows are loop-backs. From any state the orchestrator can also go to:
 - **Push and PR:** `COMMIT_PR -> PR_CLOSEOUT` (where push and PR happen) needs `dco`, `branch_scope`, `change_scope` and approval `push_and_pr`.
 - **PR closeout:** `PR_CLOSEOUT` moves forward only with `pr.ci_status == PASS`, `pr.valid_comments_open == 0` and `pr.monitoring` set.
 - **Deployment:** `AUTHORIZED_DEPLOYMENT` needs `release_readiness`, `environment_class == non-production` and approval `deploy`.
+- **Gates checked when their state ends (TRN-004):** leaving a state on the main line checks the gates it owns that a later
+  entry guard needs (e.g. `plan_readiness` on leaving IMPLEMENTATION_PLAN), not three states later.
+- **Nothing to triage (TRN-005):** SYSTEM_TEST_EXECUTION → FAILURE_TRIAGE is refused while `full_regression` is PASS; entering
+  FAILURE_TRIAGE clears `repair.classification`, so each triage classifies its own failure.
+- **Fixing regression breaks (TRN-006):** while `full_regression` is FAIL, the move into repair needs the user's one
+  `regression_fix` approval (see [7.2](#72-full-regression-run-reuse-waive-fix-or-defer)).
+- **Schema first (MAN-001):** every schema violation is reported at once with its JSON path (`$.scope.repositories[0]`) and an
+  enum's allowed values, before any guard reads the manifest.
 
 ---
 
@@ -484,7 +561,10 @@ with rationale, evidence and the commit it was checked at. `enforced_by: determi
 | Release / ops | `release_readiness`, `post_deployment`, `knowledge_update` |
 
 **Exceptions** need `gate`, `approver`, `reason`, `scope` and `timestamp`. Never waivable: `secrets`, `test_integrity` without
-approval, the repair caps, and production deployment.
+approval, the repair caps, and production deployment. Two gates have their own command so an exception is never hand-written:
+`full_regression` (`crewline regression-decision`, [7.2](#72-full-regression-run-reuse-waive-fix-or-defer)) and
+`branch_environment` (an attributed exception approves BEV-004; `environment_kind: local-test-rig` for a change confined to
+the test rig).
 
 ---
 
@@ -526,7 +606,7 @@ flowchart TB
 | Coding standards | developer | `coding_standards`, `crewline coding-standards` | repo's own lint/format checkers with a fresh `crewline run` record; no debug leftovers in the production diff; **before** review |
 | Robustness | developer | `robustness`, `crewline robustness` | no empty/swallowed catch, no raw `throws Exception`, no sleep on the hot path; reuse the module handler; every api AC has a passing error-path test; **before** review |
 | Requirement fit | developer | `requirement_fit`, `crewline requirement-fit` | AC status/error/route/quoted value appears in the diff **and** a changed test; `code_refs` were touched; **before** review |
-| Branch env | SDET | `branch_environment`, `crewline branch-env` | system tests against an env that runs **this** branch (`local-stack` or `branch-deployed-env`); `api-internal.released` is BEV-004 |
+| Branch env | SDET | `branch_environment`, `crewline branch-env` | system tests against an env that runs **this** branch (`local-stack` or `branch-deployed-env`); `api-internal.released` is BEV-004 unless a human records a `branch_environment` exception. A change only to the test rig (`api-test/`, `apitest-commons/`, UI/DSL rigs) uses `local-test-rig`: the branch build is the local test jar, so a released env is right (BEV-005 refuses it when production code changed) |
 | Defect reports | SDET | `defect_reports`, `crewline defect-reports` | APPLICATION/SECURITY defects carry a secret-scanned `report_path` |
 
 **Scope rule:** run targeted tests while iterating. Before committing, run the full suite on base and branch. If only new tests
@@ -576,7 +656,7 @@ flowchart TB
 **Enforced by:**
 - **No code before a test plan:** IMPLEMENTATION is refused until `test_plan.environment` says where the branch build runs.
 - **Every user-facing criterion is automated:** an `api` or `ui` acceptance criterion without a system-level automated test is blocked (TRC-008). One without a result on the branch build is blocked too (TRC-009).
-- **System tests and regression can't be quietly skipped:** they can't be marked "not applicable" in code flows (MAN-015). The only way to skip them is a human-approved deferral to a named environment and date; the post-merge run then becomes a follow-up task.
+- **System tests and regression can't be quietly skipped:** they can't be marked "not applicable" in code flows (MAN-015). System tests are skipped only by a human-approved deferral to a named environment and date (the post-merge run becomes a follow-up task); the full regression only by `crewline regression-decision --waive` with the user named ([7.2](#72-full-regression-run-reuse-waive-fix-or-defer)).
 - **No PR with an open defect:** the PR is refused while a defect caused by the change is open, or while a pre-existing one hasn't been raised (MAN-014).
 - **No design or code without a ticket:** nothing moves past INPUT_VALIDATION, in any task type, until a GitHub issue or Jira item is linked and the user confirmed it, Crewline created one on the user's approval (`create_tracker_item`), or the user waived it with a reason (MAN-017, `tracker_guard`). Tasks already past INPUT_VALIDATION are caught at their next move. DONE needs the closure comment on the ticket posted on approval (`tracker_comment`) or declined.
 - **Subtasks under the ticket:** past GITHUB_PLANNING, one subtask per kind the template lists (default testcase, implementation, testing, review, pr; GitHub sub-issue or Jira sub-task), linked or created on approval `create_tracker_subtasks`, or waived by the user (MAN-018). Each gets a closure comment (posted on approval or declined) before DONE.
@@ -584,6 +664,53 @@ flowchart TB
 - **Untrusted input:** a change that parses input it does not control needs ACs for input size, nesting depth, memory, time and error behaviour (REQ-005), and a threat review by the security-engineer before test design (PKT-005).
 - **PR links the ticket:** the title starts with the key and the body links the ticket; the hook refuses `gh pr create` / `gh pr edit --title|--body` otherwise (GRD-009).
 - **Where it can run:** an environment where CI deploys the PR image, or a local stack (the module's docker-compose or a local service run). MOSIP pack: options in `packs/mosip/tools.yaml` `branch_test_env`. Generic pack: the environment named in `test_plan.environment` and the module's own suite.
+
+### 7.2 Full regression: run, reuse, waive, fix or defer
+
+Every branch in this picture is **one question to the user** and **one command** that records the answer. Nothing is
+hand-edited in the manifest, and no decision is recorded once per failing test.
+
+```mermaid
+flowchart TB
+    classDef ask fill:#fff8e1,stroke:#f9a825,color:#000
+    classDef cmd fill:#e3f2fd,stroke:#1565c0,color:#000
+    classDef ok fill:#e8f5e9,stroke:#2e7d32,color:#000
+    classDef stop fill:#fde2e1,stroke:#c0392b,color:#000
+
+    START(["QUALITY_GATE: full_regression"]) --> Q1{"Run it at all?"}:::ask
+    Q1 -->|"no code changed (docs, coverage, markdown)<br/>or the user says skip"| W["regression-decision --waive<br/>--approver --reason [--repo --base]<br/>kind: no_code_change / user_waiver"]:::cmd
+    W --> PASSW["Gate accepted by an attributed exception<br/>(REG-007, MAN-012, COMMIT_PR guard)"]:::ok
+    Q1 -->|"yes"| Q2{"Recent full base run on<br/>this environment already?"}:::ask
+    Q2 -->|"yes: the user gives the report"| REUSE["regression --baseline &lt;their report&gt;<br/>--baseline-from-user --approver<br/>(REG-010 warns past 14 days)"]:::cmd
+    Q2 -->|"no"| BASE["crewline run on the base worktree<br/>--timeout --fail-on"]:::cmd
+    REUSE --> BR["crewline run on the branch worktree<br/>--timeout --fail-on"]:::cmd
+    BASE --> BR
+    BR --> CMP["regression --baseline --candidate --out<br/>pairs each &lt;env&gt;-&lt;module&gt;-&lt;lang&gt; report<br/>copies them to evidence/reports/"]:::cmd
+    CMP --> RES{"New breaks?<br/>REG-001 / 002 / 009"}
+    RES -->|"none"| PASSR["full_regression PASS"]:::ok
+    RES -->|"yes"| Q3{"Ask once: fix them now,<br/>or raise a bug and continue?"}:::ask
+    Q3 -->|"fix"| FIX["regression-decision --fix<br/>→ approval regression_fix"]:::cmd
+    FIX --> LOOP["QUALITY_GATE → IMPLEMENTATION<br/>(TRN-006 consumes the approval)<br/>repair, then run the branch again"]
+    LOOP --> BR
+    Q3 -->|"raise a bug"| BUG["defect-analyst raises ONE bug<br/>(approval create_application_bug)"]
+    BUG --> DEF["regression-decision --defer --bug KEY<br/>--record full-regression.json [--class]<br/>one exception covers every break + raised defect"]:::cmd
+    DEF --> RESCORE["regression ... --manifest &lt;m&gt; --out &lt;same record&gt;<br/>deferred cases APPROVED"]:::cmd
+    RESCORE --> PASSR
+    Q3 -->|"break caused by this change"| NODEF["Never deferred (RGD-003, MAN-014):<br/>fix it"]:::stop
+    NODEF --> FIX
+```
+
+| Situation | Command | Records |
+|---|---|---|
+| No code changed, or the user explicitly skips | `crewline regression-decision --manifest <m> --waive --approver <who> --reason <why> [--repo <wt> --base <ref>]` | `full_regression_waiver` exception, `kind` `no_code_change` (diff proves it) or `user_waiver` |
+| The user already has a recent base run | `crewline regression --baseline <their report> --candidate <branch report> --baseline-from-user --approver <who> --out ...` | `baseline_source: user`, the approver; only the branch is run |
+| New breaks, fix them | `crewline regression-decision --manifest <m> --fix --approver <who> --reason <why>` | approval `regression_fix`, consumed by the move into repair |
+| New breaks, raise a bug and continue | `crewline regression-decision --manifest <m> --defer --bug <KEY> --record <evidence/full-regression.json> --approver <who> --reason <why> [--class ENVIRONMENT]` | one `regression_deferred` exception listing every test id + a `raised` defect; then re-run `regression --manifest <m>` |
+
+Totals alone ("945 run, 937 passed") cannot show which case broke, so they are not a base: use `--waive` with the
+reason instead. KM-COV-001 needed 23 separate exceptions for what is now one `--defer`.
+
+---
 
 ## 8. Failures, repairs and escalation
 
@@ -604,6 +731,9 @@ flowchart TB
     DL -->|"cap reached"| ESC
     SL -->|"cap reached"| ESC
     ESC --> HD["Human escalation_decision<br/>names the resume state"]
+    REGB["Full regression: new breaks<br/>(base vs branch)"] --> ASK{"Ask the user once"}
+    ASK -->|"fix (regression_fix)"| DL
+    ASK -->|"raise a bug and defer"| DEFR["One bug, one exception<br/>for every break (7.2)"]
 ```
 
 - **Attempts:** one attempt is one distinct, evidence-based change followed by validation. Re-running unchanged code does not count. Counters reset only for a different fingerprint or a human-approved new investigation (ADR-0005).
@@ -620,9 +750,10 @@ and every guard deny names it. Session scratchpads and temp folders are outside 
 
 **Pausing and resuming:** `crewline resume <id>` in the new session prints everything it needs, and `crewline gates refresh`
 replaces per-task gate scripts. Neither uses the model, which is the main saving on mechanical work. For what remains, the
-specialists running validators and recording evidence can use a cheaper model through the `model:` field of their agent file
-(not set by default, because no evaluation has measured it yet). Token use per state is in `usage.md`, and
-`core/usage-budget.yaml` warns at `warn_ratio` before a state goes over its cap.
+specialists running validators and recording evidence can use a cheaper model through the `model:` field of their agent file.
+Today only `testcase-designer` sets `model: sonnet` (it did most of the work in KM-COV-001); the others are not set until an
+evaluation measures them. Token use per state is in `usage.md`, and `core/usage-budget.yaml` warns at `warn_ratio` before a
+state goes over its cap.
 
 **Fork model** (ADR-0003, `crewline branch`):
 1. Ask the **upstream** base branch before any branch exists (approval `base_branch`).
@@ -681,8 +812,8 @@ Run from `validators/`: `python -m crewline [--json] <command> ...`. Exit codes:
 
 | Command | Rules | Checks |
 |---|---|---|
-| `manifest` | MAN-001..019, TRN-001..003 | schema; template projection; guards; both repair caps; human single-use approvals; reviewer independence; risk tier; required gates; linked repos. `--to <STATE> [--apply]` |
-| `run` / `evidence` | EVD-001..004 | runs the command and records exit code, commit and worktree digest; rejects stale or incomplete records. `run` also prints a CLIP-002 digest of the log |
+| `manifest` | MAN-001..019, TRN-001..006 | schema first (every violation with its JSON path); template projection; guards; gates checked when their state ends (TRN-004); no triage without a failure (TRN-005); one approval before repairing regression breaks (TRN-006); both repair caps; human single-use approvals; reviewer independence; risk tier; required gates; linked repos. `--to <STATE> [--apply]` |
+| `run` / `evidence` | EVD-001..006 | runs the command (executable resolved through PATH/PATHEXT, so `mvn.cmd` on Windows) and records exit code, commit, worktree digest and `java_version`; `--env KEY=VALUE` for one run (names recorded, never values); `--timeout` / `--fail-on` stop a hung run (EVD-005); every report the run wrote is kept in `evidence/reports/<record>/` (EVD-006); rejects stale or incomplete records. `run` also prints a CLIP-002 digest of the log |
 | `clip` | CLIP-001..002 | digest of a log (`--file`) or of a command (`clip -- <cmd>`); cap `clip_max_chars` |
 | `change-scope` | SCP-001..003 | changed files inside `scope.approved_paths`; CI/build/deploy/config files always need `scope_change` |
 | `test-integrity` | TIN-001..006 | JUnit/TestNG and Jest/Vitest/Mocha: removed, disabled or focused tests, fewer assertions, deleted files; `--strict` for refactors |
@@ -692,21 +823,23 @@ Run from `validators/`: `python -m crewline [--json] <command> ...`. Exit codes:
 | `robustness` | ROB-001..006 | empty/swallowed catch, raw throws Exception, sleep on the hot path; `implementation.robustness` (handler reuse + hot-path notes); api AC error-path test PASS |
 | `requirement-clarity` | REQ-001..004 | story/bug key, observable ACs, no TBD/should-work; blocks design/tests |
 | `requirement-fit` | RFT-001..005 | AC observables in the diff **and** a changed test; blocks review |
-| `branch-env` | BEV-001..004 | branch-build env named; released host refused (Q8) |
+| `branch-env` | BEV-001..005 | branch-build env named; released host refused (Q8) unless an attributed `branch_environment` exception; `local-test-rig` only for a test-rig-only change |
 | `defect-reports` | DEF-001..003 | secret-scanned defect attachments |
 | `adapter-check` | ADP-001 | installed adapter matches `adapters/` (`--sync` re-renders) |
 | `evals` | EVAL-001..005 | frozen `automated_by` nodeids; `--pack frozen` needs `expected-outcomes/` |
 | `cold-start` | CS-001..005 | new-machine kit (frozen pack, adapters, synthetic `--apply`, CI spec jobs) |
-| `task` | TSK-001..007 | queue over `tasks/*/`; `export`/`import` portable memory (no logs); `start` is a conductor (next `--to`); not a daemon |
+| `task` | TSK-001..011 | queue over `tasks/*/`; `new --repo <clone>` (repeat; first = primary) fills `scope.repositories`; never creates a task in the plugin cache (TSK-011); `export`/`import` portable memory (no logs); `start` is a conductor (next `--to`); not a daemon |
 | `migration` | MIG-001..004 | upgrade/rollback and release/revoke pairs; released scripts immutable; destructive statements flagged |
-| `regression` | REG-001..006 | base vs branch from TestRig full reports or surefire XML; pass-to-fail and failing new tests block |
+| `regression` | REG-001..010 | base vs branch from TestRig full reports or surefire XML; pass-to-fail and failing new tests block; one report per language is paired by `<env>-<module>-<lang>` and a missing branch run blocks (REG-009); `--out` copies the compared reports into the task; `--baseline-from-user --approver` reuses the user's base run (REG-010); `--manifest` honours deferrals |
+| `regression-decision` | RGD-001..004 | the user's one decision: `--waive` (no code change / user waiver), `--fix` (approval `regression_fix`), `--defer --bug <KEY>` (one exception for every break + raised defect) |
+| `creds` | CRD-001..004 | `merge --from <values> --into <props>`: env values into a worktree config by key, names only in the output, tracked file skip-worktree, original kept; `restore` puts it back |
 | `branch` · `dco` | BR-001..005 · DCO-001..002 | fork model; signed-off commits |
 | `secrets` | SEC-001..005 | gitleaks when present; values never printed |
-| `tools` | TOOL-000..002 | capabilities from `core/tools.yaml` + active pack overlay; numbered enable steps |
+| `tools` | TOOL-000..003 | capabilities from `core/tools.yaml` + active pack overlay; numbered enable steps; `--task-type` (default: the active task's) skips what only other task types need (TOOL-003) |
 | `pack` | PCK-001..002 | show / list / `--set` product pack (`mosip` default, `generic` for a non-MOSIP repo) |
 | `usage` | USE-001..012 | token usage per task/stage/step **and** budget stop (`token_budget` gate); packet size; `--apply` stamps a mark (USE-009) |
 | `discover` | DSC-001..009 | module onboarding: reads poms, tests, CI, DB scripts, deploy, guidance, TestRig suites and coding-standard checkers read-only; writes evidence-labelled drafts and a baseline |
-| `guard` | GRD-001..009 | commit/push/PR gated; **GRD-009** PR title not prefixed `<tracker key>: ` or body not linking the ticket; force-push / `--no-verify` / prod always denied; **GRD-007** raw log dump or suite not via `crewline run`; **GRD-008** Read of a dump or file over `read_max_bytes` |
+| `guard` | GRD-001..009 | commit/push/PR gated; **GRD-009** PR title not prefixed `<tracker key>: ` or body not linking the ticket; force-push / `--no-verify` / prod always denied; **GRD-007** raw log dump or suite not via `crewline run`; **GRD-008** Read of a dump or file over `read_max_bytes`. Quoted arguments and heredoc bodies are not read as git commands; a write outside every git checkout and the session folder is not a repository change |
 | `manifest --next` / `status` | NXT-001..004, STS-001 | every legal move and each precondition with its state; repair attempts left, open approvals. Read these before offering the user a choice |
 | `review record` / `approval add` / `limitation add` | REC-001..002 | write records through a command that validates first; never hand-edit the manifest |
 | `ci-coverage` | CIC-001..003 | test suites the task ran that no CI workflow runs (checked on the move to FINAL_REPORT) |
@@ -724,7 +857,48 @@ Run from `validators/`: `python -m crewline [--json] <command> ...`. Exit codes:
 ```bash
 python -m crewline run --repo <worktree> --out .crewline-work/tasks/<id>/evidence/unit.json -- mvn -B -pl <module> -am test
 python -m crewline evidence --record .crewline-work/tasks/<id>/evidence/unit.json --repo <worktree>   # PASS only if still current
+
+# a TestRig suite on a chosen JDK, stopped early if the rig cannot log in
+python -m crewline run --repo <worktree> --cwd <worktree>/api-test --out .crewline-work/tasks/<id>/evidence/system-tests.json \
+    --env JAVA_HOME=<jdk-25> --timeout 90 --fail-on "HTTP 401|NotAuthorizedException" -- java -jar target/<rig>.jar
+
+# the user's environment values into the worktree config for the run, then back out (keys only in the output)
+python -m crewline creds merge --from <values file> --into <worktree>/api-test/src/main/resources/config/<module>.properties
+python -m crewline creds restore --into <worktree>/api-test/src/main/resources/config/<module>.properties
 ```
+
+**Where run reports go.** TestRig writes `testng-report/` in the folder it runs from, which is the task worktree's
+`api-test/`. That folder disappears with the worktree, so `crewline run` copies every report the run wrote into the task:
+
+```mermaid
+flowchart LR
+    classDef wt fill:#f3e5f5,stroke:#6a1b9a,color:#000
+    classDef task fill:#e8f5e9,stroke:#2e7d32,color:#000
+    classDef cmd fill:#e3f2fd,stroke:#1565c0,color:#000
+
+    subgraph WT["Task worktrees (temporary)"]
+        B["base worktree<br/>api-test/testng-report/*.html"]:::wt
+        BR["branch worktree<br/>api-test/testng-report/*.html<br/>target/surefire-reports/TEST-*.xml"]:::wt
+    end
+    RUN["crewline run --out evidence/system-tests-&lt;x&gt;.json<br/>--timeout --fail-on"]:::cmd
+    REG["crewline regression --out<br/>evidence/full-regression.json"]:::cmd
+    subgraph EV["&lt;clone&gt;/.crewline-work/tasks/&lt;id&gt;/evidence/ (kept)"]
+        R1["reports/system-tests-&lt;x&gt;/<br/>every report the run wrote"]:::task
+        R2["reports/full-regression/base/ + branch/<br/>the reports that were compared"]:::task
+        J["*.json records + *.log"]:::task
+    end
+    B --> RUN
+    BR --> RUN
+    RUN --> R1
+    RUN --> J
+    B --> REG
+    BR --> REG
+    REG --> R2
+    REG --> J
+```
+
+The records list the copies (`reports`, `baseline_copy`, `candidate_copy`) and the gates check the copies, so the base
+worktree can be removed right after its run and the reports stay available to look back at.
 
 **Token budget is a stop, not a report** (`core/usage-budget.yaml`, gate `token_budget`, principle 36). PILOT-001 spent
 about 3M tokens per review round and 6.7M waiting on background runs. `crewline usage` FAILs when the **task** or a
@@ -764,7 +938,26 @@ sessions is covered. `usage.md` also has a **By agent** table (main = orchestrat
 ## 13. Task manifest
 
 Each task has its own workspace, `<clone>/.crewline-work/tasks/<id>/`, inside the module clone but excluded from git and never committed. It holds `task-manifest.json`, `evidence/`, `usage.md`,
-`final-report.md` and `pr-body.md`. The schema is in `templates/task-manifest.schema.json`. Main fields:
+`final-report.md` and `pr-body.md`. The schema is in `templates/task-manifest.schema.json`.
+
+```
+<module clone>/
+├── .crewline/                         team memory (committed): module.yaml · development/ · qa/
+└── .crewline-work/                    local only (.git/info/exclude)
+    ├── active-task                    which task the rails apply to
+    ├── worktrees/<id>/                the branch checkout (and <id>-base for the base run)
+    └── tasks/<id>/
+        ├── task-manifest.json         state, ACs, gates, approvals, exceptions, defects
+        ├── packets/<STATE>.md         what each specialist was given (≤ packet_max_chars)
+        ├── evidence/
+        │   ├── *.json + *.log          crewline run / regression records
+        │   └── reports/<record>/       every report a run wrote, and the compared base/branch reports
+        ├── usage.md                   tokens per state, step and agent
+        ├── HANDOVER.md                crewline resume
+        └── final-report.md · pr-body.md
+```
+
+Main fields:
 
 | Field | Purpose |
 |---|---|
@@ -774,12 +967,14 @@ Each task has its own workspace, `<clone>/.crewline-work/tasks/<id>/`, inside th
 | `scope.repositories[]`, `scope.approved_paths` | repos (role, upstream, base branch, PR, `depends_on`, `version_link`) and the file globs the plan allows |
 | `requirements.acceptance_criteria[]` | `id`, `text`, `api`, `code_refs`, `test_ids`, `component_test_ids`, `matrix_row_ids` |
 | `gates[]` | status, rationale, evidence, `checked_at_commit` |
-| `approvals[]`, `exceptions[]` | human, attributed, single-use (`consumed_by`) |
+| `approvals[]`, `exceptions[]` | human, attributed, single-use (`consumed_by`); a `regression_deferred` exception lists the `test_ids` it covers and its `bug`, and never waives the whole gate; a `full_regression_waiver` carries its `kind` |
 | `implementation.authors`, `reviews.reviewers` | independence checks |
 | `repair` | `classification`, `attempt_count` (SDET), `dev_attempt_count` (developer), `attempt_history[]` with `track` |
 | `test_results` | test id to latest result on HEAD |
 | `pr` | `url`, `ci_status`, `monitoring`, `valid_comments_open`, `events` |
 | `release` | `environment`, `environment_class`, `rollback_plan_ref` |
+| `test_plan` | `environment`, `environment_kind` (`branch-deployed-env` · `local-stack` · `local-test-rig` · `post-merge-deferred`), new cases, regression suites |
+| `defects[]` | `class`, `status` (open · fixed · raised · deferred), `bug` key, `report_path` |
 | `started_at`, `usage_marks`, `usage_transcripts` | token accounting |
 
 ---
@@ -948,7 +1143,9 @@ python ../adapters/install.py --platform generic --target <workspace> --write
 python adapters/install.py --platform cursor --target <workspace> --sync --check   # after an upgrade
 ```
 
-**Prerequisites** (`python -m crewline tools` — core + active pack, each capability has numbered enable steps):
+**Prerequisites** (`python -m crewline tools [--task-type <type>]` — core + active pack, each capability has numbered enable
+steps; with a task type, or inside an active task, tools only other task types need are skipped, e.g. helm for a
+dependency-upgrade):
 - **Core:** Git, Python 3.11+, GitHub CLI, Docker/Helm (release), a dependency scanner, a disposable DB, a non-production environment, PR monitoring.
 - **MOSIP pack (default):** Java 21, Maven 3.9, Jira connector and Claude in Chrome (report attach), CoverageCli, branch TestRig env.
 
@@ -1026,17 +1223,18 @@ crewline/
 │   └── review/ security/ devops/ operations/ knowledge/
 ├── validators/
 │   ├── crewline/                validator modules (see section 11)
-│   └── tests/                   test_validators.py · test_sdlc.py · test_guard.py · test_pack.py · test_setup_scripts.py
+│   └── tests/                   test_validators · test_sdlc · test_guard · test_pack · test_task_session · test_preflight_and_ci
+│                                · test_cursor_module · test_setup_scripts · test_efficiency_findings · test_regression_decisions
 ├── templates/                   task-manifest + agent-response schemas, PR, issue, subtask, escalation, final report
 ├── .claude-plugin/              plugin.json (marketplace catalog: mosip-labs root .claude-plugin/marketplace.json)
 ├── skills/crewline/SKILL.md     the Crewline skill
 ├── hooks/hooks.json             plugin hooks: SessionStart (module detection) + PreToolUse guard
 ├── bin/                         crewline, crewline.cmd (validators on PATH)
-├── docs/agents-by-role.md       role map
+├── docs/                        agents-by-role.md (role map) · how-crewline-works.md (one-page overview)
 ├── adapters/                    claude/ (settings hooks for manual installs) · cursor/ (rule + hooks) · generic/ (ENTRY + git hooks) · hooks/crewline_hook.py · install.py
 ├── scripts/                     setup.bat · setup.sh  (one-time prereqs + optional adapter install)
 ├── knowledge/                   decisions/ (ADR-0001..0008) · frameworks/ · mosip/ · known-issues/
-├── evals/                       task-scenarios/scenarios.yaml (EV-01..59) · frozen-pack.yaml · cold-start.md · q8-local-stack.md · expected-outcomes/
+├── evals/                       task-scenarios/scenarios.yaml (EV-01..70) · frozen-pack.yaml · cold-start.md · q8-local-stack.md · expected-outcomes/
 ├── ci/                          GitHub workflow spec (a maintainer with workflow scope copies it to `.github/workflows/crewline.yml`)
 └── tasks/                       task workspaces for a Crewline clone (git-ignored); plugin users: <clone>/.crewline-work/tasks/
 ```
@@ -1050,6 +1248,18 @@ crewline/
 | Task | test automation, MOSIP-17633 | bug fix, MOSIP-38854 (NPE in `NotificationService`) |
 | Result | [#1088](https://github.com/mosip/pre-registration/pull/1088): 6 TestRig cases, 0 new breaks, bug MOSIP-45714 filed | [#1089](https://github.com/mosip/pre-registration/pull/1089): reproduction 5 tests failing on develop; full suite base 280 / branch 290 with 0 new breaks; diff coverage 100%; 4 component tests |
 | Rules it produced | fork model, full suite before commit, single-use approvals, review-comment handling, bug evidence, missing-tool guidance, linked changes | PR watching, diff coverage, component tests when system tests can't run, usage per stage and step |
+
+**What the 0.8.0 tasks taught** (MOSIP-45750 Java 21 → 25 upgrade, KM-COV-001 keymanager coverage matrices):
+
+| Seen | Cost | Now |
+|---|---|---|
+| `mvn` not found by `crewline run` on Windows; the JDK that built the evidence unknown | every build gate NOT_RUN until noticed | PATHEXT resolution, `--env JAVA_HOME`, `java_version` in the record |
+| A TestRig 401 at login hung the base run | 38 minutes | `--timeout` / `--fail-on` |
+| One user decision ("move forward") on 23 regression breaks | 23 hand-written exceptions | `regression-decision --defer --bug` |
+| Only the last of six per-language reports compared | 5 languages unchecked | pairing by `<env>-<module>-<lang>` (REG-009) |
+| Removing the base worktree invalidated the regression record | a full base re-run | reports copied into the task |
+| Guard read a manifest note as `git commit` / force-push; blocked memory writes | wasted calls and retries | quoted text ignored; writes outside checkouts allowed |
+| Meter ran blind; designers on Opus; five review rounds | 94M tokens against an 8M cap | transcript discovery, Sonnet designer, per-subagent cap, rule 14b |
 
 **PILOT-002 lessons:**
 - **Independent reviews paid off.** They found two real behaviour gaps the tests did not:
