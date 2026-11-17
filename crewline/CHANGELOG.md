@@ -9,6 +9,12 @@ because Claude Code updates an installed plugin only when that version changes. 
   changed for them.
 - **MAJOR**: a change that can break a task in progress (state machine, manifest schema). Finish or restart open tasks.
 
+## 0.8.1
+Documentation only; no rule changes. README brought up to 0.8.0 with pictures: what's new, the guard's decision flow, the
+full-regression decisions (run, reuse the user's base, waive, fix, defer) as section 7.2, where run reports go, the task
+workspace tree, and the regression-break branch in the failure diagram. Validator table, task counts (287 tests,
+EV-01..70) and the lessons from MOSIP-45750 and KM-COV-001 updated.
+
 ## 0.8.0
 Token cost. KM-COV-001 (keymanager coverage matrices) spent 94M tokens against the 8M per-task budget and the budget never
 stopped it. Stricter for tasks in progress: USE-001 is now a BLOCK, and USE-010/011 are new BLOCKs.
