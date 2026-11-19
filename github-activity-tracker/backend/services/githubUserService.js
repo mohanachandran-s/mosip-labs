@@ -83,14 +83,20 @@ async function resolveGitHubUserName({ github_user_id, login, type, name }) {
 }
 
 /**
- * Ensure the user has an active user_details row.
+ * Ensure a brand-new GitHub user has an initial active user_details row.
+ * Do not recreate an active row when the user already has assignment history
+ * (including deactivated rows); otherwise sync would undo explicit deactivation.
  */
 async function ensureActiveUserDetails(userId) {
   await pool.query(
     `
       INSERT INTO user_details (user_id, role_id, active, active_from, active_to)
-      VALUES ($1, NULL, true, '1970-01-01'::timestamp, NULL)
-      ON CONFLICT (user_id) WHERE active = true DO NOTHING
+      SELECT $1, NULL, true, '1970-01-01'::timestamp, NULL
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM user_details ud
+        WHERE ud.user_id = $1
+      )
     `,
     [userId]
   );
