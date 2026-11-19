@@ -1,7 +1,10 @@
 """Module discovery (Phase 0, task type `module-onboarding`): read a repository and draft its engineering and SDET
 context, every fact with the file it came from. Read-only on the repository; writes drafts into the local task workspace.
 
-  python -m crewline discover --repo <module repo> --module <name> [--out <dir>] [--force]
+  python -m crewline discover --repo <module repo> --module <name> [--base <ref>] [--out <dir>] [--force]
+
+Discovery reads the checked-out tree. Pass the task's base branch as --base: when HEAD is not that commit, DSC-012 says
+so and names the guidance files that differ (MAT-ONBOARD read AGENTS.md on develop for a release-1.6.x task).
 
 Writes the module's `.crewline/` layout as drafts (default out: <module clone>/.crewline-work/onboarding/, the module's local,
 excluded work dir; after the owner's review a documentation task copies `.crewline/` into the module repository):
@@ -13,8 +16,8 @@ excluded work dir; after the owner's review a documentation task copies `.crewli
   .crewline/qa/profile.draft.yaml          DRAFT validator profile derived from the real YAML (rename to profile.yaml after review)
 Existing files are never overwritten without --force. A human (module owner) reviews the drafts before use.
 
-  DSC-001  JaCoCo present but surefire argLine does not include ${argLine}/@{argLine}: coverage will not attach   WARN
-  DSC-002  no JaCoCo in any pom: diff-coverage cannot run until it is added                                       WARN
+  DSC-001  JaCoCo runs in a build but a surefire/failsafe argLine drops ${argLine}/@{argLine}: coverage will not attach WARN
+  DSC-002  no pom runs JaCoCo (absent, or only declared in pluginManagement): diff-coverage cannot run yet         WARN
   DSC-003  existing migrations without a rollback/revoke twin (legacy; recorded as baseline, not blocking)        INFO
   DSC-004  API TestRig YAML that does not parse                                                                    WARN
   DSC-005  API TestRig YAML not wired into any suite (candidate for ignore_yaml)                                   INFO
@@ -23,6 +26,11 @@ Existing files are never overwritten without --force. A human (module owner) rev
   DSC-008  a Node project with tests whose coverage reporters do not include lcov (diff-coverage cannot read it)    WARN
   DSC-009  coding-standard checkers found (spotless/checkstyle/eslint/prettier): run before review                    INFO
   DSC-010  no checker found: drafts .crewline/development/standards-proposal.md for the module owner                  INFO
+  DSC-011  DSL TestRig found (TestRunner + scenario sheet / dslrig package): recorded as the system-test project     INFO
+  DSC-012  discovery ran on a different commit than --base; lists guidance files present on one side only          WARN
+
+A Maven project is a UI-test project only when it pulls a browser driver (selenium, playwright, appium, browserstack,
+webdriver); Cucumber alone is a BDD library (MOSIP's mosipTestDataProvider uses it and drives no browser).
 """
 from __future__ import annotations
 
@@ -43,7 +51,7 @@ from .result import INFO, WARN, Result
 
 CORE = Path(__file__).resolve().parents[2]
 NS = re.compile(r"^\{.*?\}")
-SKIP = {"target", "node_modules", ".git", "api-test"}
+SKIP = {"target", "node_modules", ".git", "api-test", ".crewline-work"}   # .crewline-work: task worktrees
 
 
 def _strip(tag: str) -> str:
@@ -85,6 +93,23 @@ def _poms(root: Path) -> list[Path]:
     return sorted(out, key=lambda p: (len(p.parts), str(p)))
 
 
+def _plugins(el, managed: bool = False):
+    """(plugin element, declared under pluginManagement?) for every <plugin>, profiles included."""
+    for c in el:
+        tag = _strip(c.tag)
+        if tag == "plugin":
+            yield c, managed
+        yield from _plugins(c, managed or tag == "pluginManagement")
+
+
+def _aid(el) -> str:
+    return next(((c.text or "").strip() for c in el if _strip(c.tag) == "artifactId"), "")
+
+
+UI_DRIVERS = ("selenium", "playwright", "appium", "browserstack", "webdriver")
+TEST_PLUGINS = {"maven-surefire-plugin", "maven-failsafe-plugin"}
+
+
 def _pom_facts(root: Path, pom: Path) -> dict:
     text = pom.read_text(encoding="utf-8", errors="replace")
     tree = ET.fromstring(text)
@@ -96,10 +121,15 @@ def _pom_facts(root: Path, pom: Path) -> dict:
     artifacts = {(_strip(e.tag), (e.text or "").strip()) for e in tree.iter() if _strip(e.tag) == "artifactId"}
     names = {a for _, a in artifacts}
     modules = [(m.text or "").strip() for m in tree.iter() if _strip(m.tag) == "module"]
-    arg_lines = [(a.text or "") for a in tree.iter() if _strip(a.tag) == "argLine"]
+    plugins = list(_plugins(tree))
+    # argLine counts only in surefire/failsafe configuration: a compiler-plugin <argLine> never carries the agent
+    arg_lines = [(a.text or "") for p, _ in plugins if _aid(p) in TEST_PLUGINS
+                 for a in p.iter() if _strip(a.tag) == "argLine"]
+    jacoco_run = [p for p, managed in plugins if _aid(p) == "jacoco-maven-plugin" and not managed]
+    jacoco_managed = [p for p, managed in plugins if _aid(p) == "jacoco-maven-plugin" and managed]
     rel = _rel(root, pom)
-    ui_markers = ("selenium", "cucumber", "browserstack", "playwright", "appium")
-    is_ui_test = any(m in text.lower() for m in ui_markers) and "spring-boot-starter-web" not in names
+    is_ui_test = (any(d in n.lower() for n in names | set(props) for d in UI_DRIVERS)
+                  and "spring-boot-starter-web" not in names)
     return {
         "path": rel,
         "kind": "ui-test" if is_ui_test else "service",
@@ -107,8 +137,9 @@ def _pom_facts(root: Path, pom: Path) -> dict:
         "modules": modules,
         "java_version": props.get("java.version") or props.get("maven.compiler.source") or props.get("maven.compiler.release"),
         "java_version_ref": f"{rel}:{_line_of(text, '<java.version>')}" if "<java.version>" in text else rel,
-        "jacoco": "jacoco-maven-plugin" in names,
-        "jacoco_ref": f"{rel}:{_line_of(text, 'jacoco-maven-plugin')}" if "jacoco-maven-plugin" in names else "",
+        "jacoco": bool(jacoco_run),
+        "jacoco_managed_only": bool(jacoco_managed) and not jacoco_run,
+        "jacoco_ref": f"{rel}:{_line_of(text, 'jacoco-maven-plugin')}" if jacoco_run or jacoco_managed else "",
         "surefire_argline": [a.strip().split()[0] if a.strip() else "" for a in arg_lines],
         "surefire_argline_keeps_agent": (not arg_lines) or any("${argLine}" in a or "@{argLine}" in a for a in arg_lines),
         "test_libs": sorted(n for n in names if n in {"junit", "junit-jupiter", "junit-jupiter-api", "junit-vintage-engine",
@@ -143,7 +174,7 @@ def _node_projects(root: Path) -> list[dict]:
     out = []
     for pkg in sorted(root.rglob("package.json")):
         parts = pkg.relative_to(root).parts
-        if "node_modules" in parts or len(parts) > 4:
+        if "node_modules" in parts or ".crewline-work" in parts or len(parts) > 4:
             continue
         try:
             d = json.loads(pkg.read_text(encoding="utf-8", errors="replace"))
@@ -171,6 +202,32 @@ def _node_projects(root: Path) -> list[dict]:
     return out
 
 
+SCENARIO_SHEET = re.compile(r"scenario.*\.(csv|xlsx?)$", re.I)
+
+
+def _dsl_rigs(root: Path) -> list[dict]:
+    """DSL TestRig projects: a Maven project with a TestRunner under src/main/java, in a `dslrig` package or next to a
+    scenario sheet (mosip-automation-tests: ivv-orchestrator + ivv-dg/ScenarioSheet.csv)."""
+    sheets = sorted(_rel(root, p) for p in root.rglob("*") if p.is_file() and SCENARIO_SHEET.search(p.name)
+                    and not SKIP & set(p.relative_to(root).parts))
+    out = []
+    for runner in sorted(root.rglob("TestRunner.java")):
+        parts = runner.relative_to(root).parts
+        if SKIP & set(parts) or "src" not in parts:
+            continue
+        project = Path(*parts[:parts.index("src")]) if parts.index("src") else Path(".")
+        if not (root / project / "pom.xml").is_file():
+            continue
+        # sheets of this rig: under the rig's aggregator (its parent folder), archived copies left out
+        near = [s for s in sheets if s.startswith(project.parent.as_posix().rstrip("/.") + "/" if project.parent.parts else "")
+                and "/archive/" not in "/" + s.lower()]
+        if "dslrig" not in runner.as_posix().lower() and not near:
+            continue
+        out.append({"path": project.as_posix(), "kind": "dsl-testrig", "runner": _rel(root, runner),
+                    "scenario_sheets": near})
+    return out
+
+
 def _migrations(root: Path) -> dict:
     out = {"dirs": [], "forward": 0, "unpaired": []}
     for d in ("db_upgrade_scripts", "db_release_scripts", "db_scripts"):
@@ -178,7 +235,7 @@ def _migrations(root: Path) -> dict:
             out["dirs"].append(d)
     for p in sorted(root.rglob("*.sql")):
         rel = "/" + _rel(root, p)
-        if "target" in p.parts:
+        if {"target", ".crewline-work"} & set(p.parts):
             continue
         for rx, twins in FORWARD:
             m = rx.match(rel)
@@ -274,6 +331,27 @@ def _api_test(root: Path) -> dict | None:
     }
 
 
+def _guidance_diff(root: Path, base: str) -> dict | None:
+    """When HEAD is not --base: which guidance files exist on only one of the two."""
+    try:
+        base_sha = git(root, "rev-parse", "--verify", base + "^{commit}").strip()
+    except RuntimeError:
+        return {"base": base, "error": "unknown ref"}
+    head_sha = git(root, "rev-parse", "HEAD").strip()
+    if base_sha == head_sha:
+        return None
+
+    def present(ref: str) -> set[str]:
+        out = set()
+        for line in git(root, "ls-tree", "-r", "--name-only", ref).splitlines():
+            if line.rsplit("/", 1)[-1] in ("AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md", "CODEOWNERS"):
+                out.add(line)
+        return out
+    on_head, on_base = present("HEAD"), present(base_sha)
+    return {"base": base, "base_commit": base_sha, "head_commit": head_sha,
+            "only_on_head": sorted(on_head - on_base), "only_on_base": sorted(on_base - on_head)}
+
+
 def collect(repo: str) -> dict:
     root = Path(git(repo, "rev-parse", "--show-toplevel").strip())
     facts: dict = {"repo": str(root), "repo_name": root.name, "head": git(root, "rev-parse", "HEAD").strip(),
@@ -290,6 +368,9 @@ def collect(repo: str) -> dict:
     facts["services"] = {p["path"].rsplit("/pom.xml", 1)[0] or ".": _java_tests(root, root / p["path"].rsplit("pom.xml", 1)[0])
                          for p in services}
     facts["ui_test_projects"] = [p["path"].rsplit("/pom.xml", 1)[0] for p in poms if p["kind"] == "ui-test"]
+    facts["system_test_projects"] = _dsl_rigs(root)
+    for rig in facts["system_test_projects"]:             # a test rig is not a service: no unit/coverage gates on it
+        facts["services"].pop(rig["path"], None)
     facts["node"] = _node_projects(root)
     wf = root / ".github/workflows"
     facts["ci"] = {"workflows": sorted(f.name for f in wf.glob("*.y*ml")) if wf.is_dir() else [],
@@ -297,7 +378,8 @@ def collect(repo: str) -> dict:
                                    for m in re.findall(r"uses:\s*([\w./-]+)@", f.read_text(encoding="utf-8", errors="replace"))})}
     facts["db"] = _migrations(root)
     facts["deploy"] = {"helm": sorted(_rel(root, p.parent) for p in root.glob("helm/*/Chart.yaml")),
-                       "dockerfiles": sorted(_rel(root, p) for p in root.rglob("Dockerfile") if "target" not in p.parts)}
+                       "dockerfiles": sorted(_rel(root, p) for p in root.rglob("Dockerfile")
+                                            if not {"target", ".crewline-work"} & set(p.parts))}
     facts["guidance"] = [n for n in ("AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md", ".github/CODEOWNERS",
                                      "api-test/src/main/resources/coverage/AGENTS.md",
                                      "api-test/src/main/resources/coverage/README.md") if (root / n).exists()]
@@ -332,7 +414,7 @@ file named unless marked Inferred. A module owner reviews this draft; then copy 
 | Maven parent | `{parent}` | file |
 | Java | {', '.join(java) or 'Unknown'} | {', '.join(p['java_version_ref'] for p in m['poms'] if p['java_version'])[:200] or '-'} |
 | Unit-test libraries | {', '.join(libs) or 'none found'} | poms |
-| JaCoCo | {'yes' if jacoco else '**no**'}{'' if agent_ok else ' - **surefire argLine drops ${argLine}: coverage will not attach (DSC-001)**'} | {', '.join(p['jacoco_ref'] for p in jacoco)[:200] or '-'} |
+| JaCoCo | {'yes' if jacoco else ('**no** (only in pluginManagement)' if any(p['jacoco_managed_only'] for p in m['poms']) else '**no**')}{'' if agent_ok else ' - **surefire argLine drops ${argLine}: coverage will not attach (DSC-001)**'} | {', '.join(p['jacoco_ref'] for p in jacoco)[:200] or '-'} |
 | CI workflows | {', '.join(f['ci']['workflows']) or 'none'} | `.github/workflows/` |
 | Reusable CI | {', '.join(f['ci']['uses'])[:300] or 'none'} | workflow `uses:` |
 | DB scripts | {', '.join(db['dirs']) or 'none'}; {db['forward']} forward scripts, {len(db['unpaired'])} without a rollback twin (legacy) | `crewline migration` conventions |
@@ -346,7 +428,7 @@ file named unless marked Inferred. A module owner reviews this draft; then copy 
 |---|---|---|
 {rows}
 
-{_node_md(f)}{_ui_md(f)}
+{_node_md(f)}{_ui_md(f)}{_dsl_md(f)}
 ## Commands (Inferred from the layout; mark Verified once run)
 
 - Build: `mvn -B -f {parent} -Dmaven.gitcommitid.skip=true -pl <service> -am verify`
@@ -391,6 +473,16 @@ def _ui_md(f: dict) -> str:
         return ""
     return ("\n## UI test projects (SDET specialty: ui-automation)\n\n" + "\n".join(f"- `{p}` (Selenium/Cucumber-style Maven project; "
             "not a service: excluded from unit/coverage gates)" for p in f["ui_test_projects"]) + "\n")
+
+
+def _dsl_md(f: dict) -> str:
+    if not f.get("system_test_projects"):
+        return ""
+    return ("\n## System-test rig (SDET specialty: dsl-automation)\n\n" + "\n".join(
+        f"- `{r['path']}`: DSL TestRig, runner `{r['runner']}`; scenario sheets: "
+        + (", ".join(f"`{s}`" for s in r["scenario_sheets"]) or "none found")
+        + ". Not a service: excluded from unit/coverage gates; runs against a deployed environment." for r in
+        f["system_test_projects"]) + "\n")
 
 
 CHECKERS = {   # the usual checker per stack; the proposal only suggests, the module owner decides
@@ -466,10 +558,12 @@ Commons script classes are not scanned: remaining DEP-001 findings may still nee
 """
 
 
-def run(repo: str, module: str, out: str | None = None, force: bool = False) -> Result:
-    res = Result("discover", inputs={"repo": repo, "module": module})
+def run(repo: str, module: str, out: str | None = None, force: bool = False, base: str | None = None) -> Result:
+    res = Result("discover", inputs={"repo": repo, "module": module, "base": base})
     try:
         facts = collect(repo)
+        if base:
+            facts["base_diff"] = _guidance_diff(Path(facts["repo"]), base)
     except (RuntimeError, OSError, ET.ParseError) as e:
         return Result.not_run("discover", str(e))
     target = Path(out) if out else Path(facts["repo"]) / ".crewline-work" / "onboarding"
@@ -478,7 +572,23 @@ def run(repo: str, module: str, out: str | None = None, force: bool = False) -> 
         res.add("DSC-001", WARN, "surefire argLine does not include ${argLine}: JaCoCo agent will not attach",
                 path=next(p["path"] for p in poms if not p["surefire_argline_keeps_agent"]))
     if poms and not any(p["jacoco"] for p in poms):
-        res.add("DSC-002", WARN, "no jacoco-maven-plugin in any pom: diff-coverage cannot run until it is added")
+        managed = [p["path"] for p in poms if p["jacoco_managed_only"]]
+        res.add("DSC-002", WARN, ("jacoco-maven-plugin is only declared in pluginManagement (" + ", ".join(managed) +
+                                  "): no module's build/plugins runs it, so diff-coverage cannot run until one does")
+                if managed else "no jacoco-maven-plugin in any pom: diff-coverage cannot run until it is added")
+    for rig in facts["system_test_projects"]:
+        res.add("DSC-011", INFO, f"DSL TestRig at {rig['path']} (runner {rig['runner']}; scenario sheets: "
+                f"{', '.join(rig['scenario_sheets']) or 'none'}): the system-test project, not a service",
+                path=rig["runner"])
+    gd = facts.get("base_diff")
+    if gd:
+        if gd.get("error"):
+            res.add("DSC-012", WARN, f"--base {gd['base']}: {gd['error']}; discovery used HEAD ({facts['branch']})")
+        else:
+            res.add("DSC-012", WARN, f"discovery read {facts['branch']} @ {gd['head_commit'][:10]}, but the task base is "
+                    f"{gd['base']} @ {gd['base_commit'][:10]}: check out the base (or a worktree of it) and re-run. "
+                    f"Guidance only on HEAD: {', '.join(gd['only_on_head']) or 'none'}; only on base: "
+                    f"{', '.join(gd['only_on_base']) or 'none'}")
     for n in facts["node"]:
         if n["test_files"] and not n["lcov"]:
             res.add("DSC-008", WARN, f"{n['path']}: Jest coverage reporters {n['coverage_reporters']} have no lcov; "
@@ -524,7 +634,8 @@ def run(repo: str, module: str, out: str | None = None, force: bool = False) -> 
         "module": module, "remotes": facts["remotes"],
         "verified_at": {"commit": facts["head"], "date": facts["discovered_at"]},
         "stack": {"maven_parent": facts["maven"]["parent"], "node_projects": [n["path"] for n in facts["node"]],
-                  "ui_test_projects": facts["ui_test_projects"], "api_test": bool(a)},
+                  "ui_test_projects": facts["ui_test_projects"], "api_test": bool(a),
+                  "system_test_projects": [r["path"] for r in facts["system_test_projects"]]},
         "roles": roles}, sort_keys=False)
     files[".crewline/README.md"] = (
         f"# {module}: Crewline context\n\n"

@@ -1,21 +1,26 @@
-# Token budgets (Blueprint cost control). Metric is TOTAL tokens the API billed:
-# input + cache_write + cache_read + output. cache_read is cheap per token but is usually
-# the largest number and still counts on Cursor/Claude packs.
+# Token budgets (Blueprint cost control). Metric is WEIGHTED tokens:
+#   input + cache_write + output + cache_read * cache_read_weight
+# cache_read (the re-read conversation) is about a tenth of the price of fresh input and is usually 95%+ of the
+# total, so counting it at full weight stopped tasks for cost they did not incur (JAVA25-UPGRADE: 21.6M total,
+# 525k fresh; MAT-ONBOARD INTAKE 2.51M total). `metric: total` restores the old full-weight count.
+# Calls made in WAITING_FOR_USER, or in a step marked `wait: ...`, are reported but never count against a cap.
 #
-# PILOT-001 (Verified): ~3M total per review round; ~6.7M waiting on background runs.
+# Calibration: weighted ~= 0.12 x total on the pilots. PILOT-001 ~3M total per review round = ~0.36M weighted;
+# JAVA25-UPGRADE whole task ~2.6M weighted.
 # Defaults are a stop, not a target. Raise only with an attributed gate exception on token_budget.
-version: 1
-metric: total
-per_task: 8000000          # whole task; exceed -> WAITING_FOR_USER (continue / split / abort)
-per_state: 2500000         # default cap for any one workflow state
+version: 2
+metric: weighted
+cache_read_weight: 0.1
+per_task: 3000000          # whole task; exceed -> WAITING_FOR_USER (continue / split / abort)
+per_state: 800000          # default cap for any one workflow state
 warn_ratio: 0.7
 hot_states:
-  IMPLEMENTATION: 3000000
-  IMPLEMENTATION_REVIEW: 2500000
-  FRESH_CONTEXT_REVIEW: 2500000
-  SYSTEM_TEST_EXECUTION: 1500000
-  PR_CLOSEOUT: 1500000
-per_subagent: 1500000      # one subagent run (USE-011). KM-COV-001: 8 testcase-designers at 2.3M-11.7M each
+  IMPLEMENTATION: 1000000
+  IMPLEMENTATION_REVIEW: 800000
+  FRESH_CONTEXT_REVIEW: 800000
+  SYSTEM_TEST_EXECUTION: 500000
+  PR_CLOSEOUT: 500000
+per_subagent: 500000       # one subagent run (USE-011). KM-COV-001: 8 testcase-designers at 2.3M-11.7M total each
 context_warn: 150000       # peak context of one call, orchestrator or subagent (USE-012): compact / split
 packet_max_chars: 20000   # specialist context packet on disk (tasks/<id>/packets)
 clip_max_chars: 4000       # crewline clip / run digest (the agent reads this, never the raw log)

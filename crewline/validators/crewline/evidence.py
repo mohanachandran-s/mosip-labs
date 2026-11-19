@@ -4,7 +4,7 @@
 before a gate uses it.
 
   python -m crewline run --repo <dir> --out <task>/evidence/unit.json [--report <path>] [--env JAVA_HOME=<jdk>]
-                         [--timeout <minutes>] [--fail-on <regex>] -- mvn -B test
+                         [--timeout <minutes>] [--stall <minutes>] [--fail-on <regex>] -- mvn -B test
   python -m crewline evidence --record <task>/evidence/unit.json --repo <dir>
 
 Record: {command, cwd, exit_code, started_at, duration_s, commit, worktree_digest, log, report, reports, java_version, env,
@@ -16,13 +16,15 @@ Reports are kept with the task: `--report` and every report the run wrote (TestR
 `TEST-*.xml`, `cucumber.json`, newer than the start, under the run's folder) are copied to `<out dir>/reports/<out stem>/`
 and listed in `reports`, so they outlive the worktree and can be looked at later.
 `--timeout` stops a run after N minutes, `--fail-on` as soon as the log matches the regex (e.g. a 401 at TestRig login,
-which otherwise hangs the suite); the record says `stopped` and why.
+which otherwise hangs the suite), `--stall` when the log has not grown for N minutes (a build that started a
+server and waits on it - MAT-ONBOARD sat 15+ min on an idle Tomcat log - or a suite blocked on a dead endpoint); it
+needs no guess of the total run time. The record says `stopped` and why.
 
   EVD-001  record misses a required field                                        BLOCK
   EVD-002  commit is not the repository HEAD, or the uncommitted state changed   BLOCK (stale evidence)
   EVD-003  exit_code is not 0                                                    BLOCK
   EVD-004  log or report path in the record does not exist (a kept copy counts)  BLOCK
-  EVD-005  run stopped by --timeout or --fail-on                                 BLOCK
+  EVD-005  run stopped by --timeout, --stall or --fail-on                       BLOCK
   EVD-006  reports kept in <out dir>/reports/<out stem>/                          INFO
 """
 from __future__ import annotations
@@ -93,17 +95,26 @@ def keep_reports(out: Path, cwd: Path, since: float, report: str | None) -> list
 
 
 def _watch(argv: list[str], cwd: str, env: dict, log: Path, timeout_min: float | None,
-           fail_on: str | None) -> tuple[int, str]:
-    """Run with the log on disk; stop on timeout or when the log matches `fail_on`. Returns (exit code, why stopped)."""
+           fail_on: str | None, stall_min: float | None = None, tick: float = 1.0) -> tuple[int, str]:
+    """Run with the log on disk; stop on timeout, on a log idle for `stall_min`, or when the log matches `fail_on`.
+    Returns (exit code, why stopped)."""
     pattern = re.compile(fail_on) if fail_on else None
     deadline = time.monotonic() + timeout_min * 60 if timeout_min else None
     with log.open("w", encoding="utf-8", errors="replace") as fh:
         proc = subprocess.Popen(argv, cwd=cwd, stdout=fh, stderr=subprocess.STDOUT, shell=False, env=env)
-        if not pattern and not deadline:
+        if not pattern and not deadline and not stall_min:
             return proc.wait(), ""
         pos, why = 0, ""
+        size, grew = -1, time.monotonic()
         while proc.poll() is None:
-            time.sleep(1)
+            time.sleep(tick)
+            if stall_min:
+                fh.flush()
+                now_size = log.stat().st_size
+                if now_size != size:
+                    size, grew = now_size, time.monotonic()
+                elif time.monotonic() - grew > stall_min * 60:
+                    why = f"--stall: log idle for {stall_min:g} min (last output at {size} bytes)"
             if pattern:
                 with log.open("rb") as rd:
                     rd.seek(max(pos - 4096, 0))          # overlap, so a match split across reads is still seen
@@ -132,7 +143,8 @@ def _kill(proc: subprocess.Popen) -> None:
 
 
 def capture(repo: str, out: str, command: list[str], report: str | None = None, cwd: str | None = None,
-            env: list[str] | None = None, timeout_min: float | None = None, fail_on: str | None = None) -> Result:
+            env: list[str] | None = None, timeout_min: float | None = None, fail_on: str | None = None,
+            stall_min: float | None = None) -> Result:
     res = Result("run", inputs={"repo": repo, "command": " ".join(command)})
     if not command:
         return Result.not_run("run", "no command given (put it after --)")
@@ -153,7 +165,8 @@ def capture(repo: str, out: str, command: list[str], report: str | None = None, 
         rec["java_version"] = jv
     t0, wall0 = time.monotonic(), time.time()
     try:
-        rec["exit_code"], stopped = _watch(clip.resolve_argv(command, child), rec["cwd"], child, log, timeout_min, fail_on)
+        rec["exit_code"], stopped = _watch(clip.resolve_argv(command, child), rec["cwd"], child, log, timeout_min, fail_on,
+                                           stall_min)
     except OSError as e:
         return Result.not_run("run", f"could not start {command[0]}: {e}")
     except re.error as e:

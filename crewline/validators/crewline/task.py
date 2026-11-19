@@ -20,6 +20,7 @@
   TSK-009  crewline resume: hand-over generated from the manifest (handover.py)
   TSK-010  worktree: create the task worktree and enable the plugin in it; context is found, not copied (ADR-0009)
   TSK-011  new: a --repo is not a git checkout, or no clone at all (the task would land in the plugin cache)   BLOCK
+  TSK-012  close: record final_report_ref (--report), remove clean task worktrees, apply FINAL_REPORT -> DONE
 
 Workspace: CREWLINE_TASKS=<dir>, else `new --repo <clone>`, else <clone>/.crewline-work/tasks/ in a repository with .crewline/, else <core>/tasks/
 (see workspace.py).
@@ -274,10 +275,71 @@ def _worktree(task_id: str | None, base: str | None, branch: str | None, res: Re
     return res.finish()
 
 
+def _close(task_id: str | None, report: str | None, res: Result) -> Result:
+    """FINAL_REPORT -> DONE without hand edits: record final_report_ref, remove clean task worktrees, apply DONE."""
+    if not task_id:
+        res.add("TSK-001", BLOCK, "pass --id")
+        return res.finish()
+    path, doc, err = _load(task_id)
+    if doc is None:
+        res.add("TSK-001", BLOCK, err)
+        return res.finish()
+    if report:
+        rp = Path(report)
+        if not rp.is_file():
+            res.add("TSK-012", BLOCK, f"--report {report} does not exist")
+            return res.finish()
+        try:
+            doc["final_report_ref"] = rp.resolve().relative_to(path.parent.resolve()).as_posix()
+        except ValueError:
+            doc["final_report_ref"] = rp.resolve().as_posix()
+    elif not doc.get("final_report_ref"):
+        res.add("TSK-012", BLOCK, "no final report recorded: pass --report <task>/final-report.md")
+        return res.finish()
+    wsp = doc.get("workspace") or {}
+    clone = Path(wsp.get("clone") or path.parents[3])
+    for w in wsp.get("worktrees") or []:
+        tree = Path(w.get("path") or "")
+        if w.get("removed_at") or not w.get("path"):
+            continue
+        if tree.is_dir():
+            dirty = gitio.git(tree, "status", "--porcelain", check=False).strip()
+            if dirty:
+                res.add("TSK-012", WARN, f"{tree} has uncommitted changes: kept (commit or discard them, then close again)")
+                continue
+            try:
+                gitio.git(clone, "worktree", "remove", str(tree))
+            except RuntimeError as e:
+                res.add("TSK-012", WARN, f"could not remove {tree}: {e}")
+                continue
+        w["removed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        res.add("TSK-012", INFO, f"worktree {tree.as_posix()} removed (branch {w.get('branch', '?')} kept)")
+    if wsp.get("worktrees") is not None:
+        wsp["open_worktrees"] = sum(1 for w in wsp["worktrees"] if not w.get("removed_at"))
+    path.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    if doc.get("current_state") == "FINAL_REPORT":
+        done = manifest.apply(str(path), "DONE", "crewline task close")
+        for f in done.findings:
+            if f.severity == BLOCK:
+                res.add(f.rule_id, BLOCK, f.message, path=f.path, evidence=f.evidence)
+        if done.status == "PASS":
+            res.add("TSK-012", INFO, f"{task_id} -> DONE")
+    elif doc.get("current_state") != "DONE":
+        res.add("TSK-012", WARN, f"{task_id} is at {doc.get('current_state')}: report recorded; DONE follows FINAL_REPORT")
+    try:
+        if workspace.active_file().read_text(encoding="utf-8").strip() == task_id:
+            workspace.active_file().unlink()
+    except OSError:
+        pass
+    return res.finish()
+
+
 def run(action: str, task_id: str | None = None, task_type: str | None = None,
         out: str | None = None, archive: str | None = None, base: str | None = None, branch: str | None = None,
-        repos: list[str] | None = None) -> Result:
+        repos: list[str] | None = None, report: str | None = None) -> Result:
     res = Result("task", inputs={"action": action, "root": str(tasks_root())})
+    if action == "close":
+        return _close(task_id, report, res)
     if action == "list":
         rows = _iter()
         res.inputs["count"] = len(rows)
@@ -432,5 +494,6 @@ def run(action: str, task_id: str | None = None, task_type: str | None = None,
             res.add("TSK-005", BLOCK, "pass --from <dir-or-zip>")
             return res.finish()
         return _import(archive, task_id, res)
-    res.add("TSK-002", BLOCK, f"unknown action {action!r}: list, status, resume, new, start, export, import, activate, deactivate, worktree")
+    res.add("TSK-002", BLOCK, f"unknown action {action!r}: list, status, resume, new, start, export, import, activate, deactivate, "
+            "worktree, close")
     return res.finish()

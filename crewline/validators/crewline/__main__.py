@@ -93,8 +93,19 @@ def _task_manifest(manifest_path: str | None, task_id: str | None) -> str:
     return str(workspace.active_manifest()[0] or "")
 
 
+def _latest_manifest() -> str:
+    """The most recently changed task, open or closed (status right after DONE)."""
+    root = task.tasks_root()
+    found = [(p.stat().st_mtime, p) for p in root.glob("*/task-manifest.json")] if root.is_dir() else []
+    return str(max(found)[1]) if found else ""
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    from . import version as _version
+    _stale = _version.stale_install()
+    if _stale:
+        print(_stale, file=sys.stderr)
     command: list[str] = []
     if "--" in argv:                          # `run ... -- <command>`: everything after -- is the command
         i = argv.index("--")
@@ -173,6 +184,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--env", action="append", default=[], metavar="KEY=VALUE",
                    help="set for this run only, e.g. JAVA_HOME=<jdk> (its bin/ leads PATH); the record keeps the names")
     p.add_argument("--timeout", type=float, metavar="MINUTES", help="stop the run after this many minutes (EVD-005)")
+    p.add_argument("--stall", type=float, metavar="MINUTES",
+                   help="stop the run when its log has not grown for this many minutes (a hung build; EVD-005)")
     p.add_argument("--fail-on", dest="fail_on", metavar="REGEX",
                    help="stop as soon as the log matches, e.g. 'HTTP 401|NotAuthorizedException' for a TestRig login")
     p = sub.add_parser("clip")
@@ -206,7 +219,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--type", dest="task_type")
     p = sub.add_parser("task")
     p.add_argument("action", choices=["list", "status", "resume", "new", "start", "export", "import",
-                                      "activate", "deactivate", "worktree"])
+                                      "activate", "deactivate", "worktree", "close"])
+    p.add_argument("--report", dest="task_report", help="for close: the final report file (final_report_ref)")
     p.add_argument("--id", dest="task_id")
     p.add_argument("--base", dest="task_base", help="for worktree: upstream ref to cut the branch from, e.g. upstream/develop")
     p.add_argument("--branch", dest="task_branch", help="for worktree: new branch name")
@@ -229,6 +243,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--approver", required=True); p.add_argument("--reason", required=True); p.add_argument("--scope", required=True)
     p.add_argument("--exception", action="store_true", help="a gate exception (with --gate)"); p.add_argument("--gate")
     p.add_argument("--follow-up"); p.add_argument("--no-follow-up")
+    p = sub.add_parser("tracker", help="tracker waive: the user declined a ticket (or --subtasks)")
+    p.add_argument("action", choices=["waive"]); task_arg(p)
+    p.add_argument("--approver", required=True); p.add_argument("--reason", required=True)
+    p.add_argument("--scope", default="this task"); p.add_argument("--subtasks", action="store_true")
     p = sub.add_parser("limitation", help="limitation add: a known limitation and its follow-up")
     p.add_argument("action", choices=["add"]); task_arg(p)
     p.add_argument("--lim", required=True, help="limitation id, e.g. KL-PYSDK-001"); p.add_argument("--text")
@@ -249,6 +267,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("discover")
     p.add_argument("--repo", required=True); p.add_argument("--module", required=True)
     p.add_argument("--out"); p.add_argument("--force", action="store_true")
+    p.add_argument("--base", help="the task's base branch: warn (DSC-012) when the checked-out tree is another commit")
     p = sub.add_parser("diff-coverage"); repo_base(p)
     p.add_argument("--jacoco", required=True, help="jacoco.xml or a directory searched for jacoco.xml")
     p.add_argument("--threshold", type=float, default=80.0); p.add_argument("--include", help="default: every changed source file that is not a test")
@@ -349,7 +368,8 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 res = coverage.run(a.commons_dir, a.module_root, a.module_code, a.offline)
         elif a.cmd == "run":
-            res = evidence.capture(a.repo, a.out, command, a.report, a.cwd, a.env, a.timeout, a.fail_on)
+            res = evidence.capture(a.repo, a.out, command, a.report, a.cwd, a.env, a.timeout, a.fail_on,
+                                   a.stall)
         elif a.cmd == "clip":
             if command:
                 res = clip.run_command(command, a.max_chars)
@@ -389,14 +409,19 @@ def main(argv: list[str] | None = None) -> int:
             res = task.run("start", a.task_id, a.task_type)
         elif a.cmd == "task":
             res = task.run(a.action, a.task_id, a.task_type, getattr(a, "task_out", None), getattr(a, "task_from", None),
-                           a.task_base, a.task_branch, a.task_repos)
-        elif a.cmd in ("status", "review", "approval", "limitation"):
+                           a.task_base, a.task_branch, a.task_repos, a.task_report)
+        elif a.cmd in ("status", "review", "approval", "limitation", "tracker"):
             from . import records
             path = _task_manifest(getattr(a, "manifest", None), a.task_id)
+            closed = False
+            if not path and a.cmd == "status":
+                path, closed = _latest_manifest(), True
             if not path:
                 res = Result.not_run(a.cmd, "no task manifest: pass --id, or activate a task")
             elif a.cmd == "status":
-                res = records.status(path)
+                res = records.status(path, closed)
+            elif a.cmd == "tracker":
+                res = records.tracker_waive(path, a.approver, a.reason, a.scope, a.subtasks)
             elif a.cmd == "review":
                 res = records.review_record(path, a.review, a.result, a.reviewer)
             elif a.cmd == "approval":
@@ -416,7 +441,7 @@ def main(argv: list[str] | None = None) -> int:
             res = gates.refresh(path, a.state, a.every, a.rerun) if path and Path(path).is_file() \
                 else Result.not_run("gates-refresh", f"no task manifest: {path or 'no active task; pass --id'}")
         elif a.cmd == "discover":
-            res = discover.run(a.repo, a.module, a.out, a.force)
+            res = discover.run(a.repo, a.module, a.out, a.force, a.base)
         elif a.cmd == "diff-coverage":
             res = diff_coverage.run(a.repo, a.base, a.jacoco, a.threshold, a.include)
         elif a.cmd == "usage":

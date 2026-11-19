@@ -11,6 +11,11 @@ Token kinds: input (uncached), cache_write, cache_read, output. `fresh` = input 
 were new to the model in that call; cache_read is the re-read conversation, cheap but often the largest number.
 Calls are de-duplicated by message id. The numbers are what the API reported, not estimates.
 
+Budgets compare `metric` (core/usage-budget.yaml): `weighted` (default) = fresh + cache_read * cache_read_weight (0.1,
+roughly its price), so a long but cheap conversation does not trip the cap; `total` counts every token at full weight.
+Waiting on a person is not waste: calls made while the task is in WAITING_FOR_USER, or in a step whose mark starts with
+`wait:` (`usage --mark "wait: user installs JDK 25"`), are reported under `waited` and left out of every cap.
+
 With no --transcript and no `usage_transcripts` on the manifest, the Claude Code transcripts are found by themselves:
 every <claude config>/projects/<slug>/*.jsonl whose slug is the clone (or one of its .crewline-work worktrees) and that
 was written after started_at. `CLAUDE_CONFIG_DIR` overrides ~/.claude.
@@ -148,7 +153,16 @@ def load_budget(doc: dict) -> dict:
         "packet_max_chars": int(over.get("packet_max_chars", raw.get("packet_max_chars", 20000))),
         "per_subagent": int(over.get("per_subagent", raw.get("per_subagent", 1500000))),
         "context_warn": int(over.get("context_warn", raw.get("context_warn", 150000))),
+        "metric": str(over.get("metric", raw.get("metric", "total"))),
+        "cache_read_weight": float(over.get("cache_read_weight", raw.get("cache_read_weight", 0.1))),
     }
+
+
+WAIT_STATES = {"WAITING_FOR_USER"}
+
+
+def _waiting(stage: str, step: str) -> bool:
+    return stage in WAIT_STATES or step.lower().startswith("wait:")
 
 
 def _check_packets(manifest_path: str, budget: dict, res: Result) -> None:
@@ -170,15 +184,20 @@ def _check_packets(manifest_path: str, budget: dict, res: Result) -> None:
 
 
 def _bucket() -> dict:
-    return {"calls": 0, **{k: 0 for k in KINDS}, "fresh": 0, "total": 0}
+    return {"calls": 0, **{k: 0 for k in KINDS}, "fresh": 0, "total": 0, "weighted": 0, "budgeted": 0, "waited": 0}
 
 
-def _add(b: dict, c: dict) -> None:
+def _add(b: dict, c: dict, weight: float = 0.1, metric: str = "total", waiting: bool = False) -> None:
     b["calls"] += 1
     for k in KINDS:
         b[k] += c[k]
-    b["fresh"] += c["input"] + c["cache_write"] + c["output"]
+    fresh = c["input"] + c["cache_write"] + c["output"]
+    b["fresh"] += fresh
     b["total"] += sum(c[k] for k in KINDS)
+    w = int(round(fresh + c["cache_read"] * weight))
+    b["weighted"] += w
+    spent = w if metric == "weighted" else sum(c[k] for k in KINDS)
+    b["waited" if waiting else "budgeted"] += spent
 
 
 def report(manifest_path: str, transcripts: list[str], out: str | None = None) -> Result:
@@ -202,6 +221,8 @@ def report(manifest_path: str, transcripts: list[str], out: str | None = None) -
     marks = sorted(doc.get("usage_marks", []), key=lambda m: m["at"])
     mark_at = [_ts(m["at"]) for m in marks]
 
+    budget = load_budget(doc)
+    metric, weight = budget["metric"], budget["cache_read_weight"]
     overall, by_stage, by_step, by_agent, peak = _bucket(), {}, {}, {}, {}
     for c in calls(transcripts):
         if not start <= c["at"] <= end:
@@ -209,14 +230,14 @@ def report(manifest_path: str, transcripts: list[str], out: str | None = None) -
         stage = stage_name[bisect.bisect_right(stage_at, c["at"]) - 1]
         i = bisect.bisect_right(mark_at, c["at"]) - 1
         step = marks[i]["label"] if i >= 0 else "(before first step mark)"
+        waiting = _waiting(stage, step)
         for b in (overall, by_stage.setdefault(stage, _bucket()), by_step.setdefault(step, _bucket()),
                   by_agent.setdefault(c["source"], _bucket())):
-            _add(b, c)
+            _add(b, c, weight, metric, waiting)
         ctx = c["input"] + c["cache_write"] + c["cache_read"]
         peak[c["source"]] = max(peak.get(c["source"], 0), ctx)
     for src, b in by_agent.items():
         b["peak_context"] = peak.get(src, 0)
-    budget = load_budget(doc)
     if not overall["calls"]:
         if transcripts:
             res.add("USE-001", BLOCK, f"{len(transcripts)} transcript(s) but no model call inside the task window "
@@ -229,24 +250,26 @@ def report(manifest_path: str, transcripts: list[str], out: str | None = None) -
                     "on Claude pass --transcript so the budget can stop the task")
     else:
         for src, b in by_agent.items():
-            if src != "main" and b["total"] > budget["per_subagent"]:
-                res.add("USE-011", BLOCK, f"subagent {src}: {b['total']:,} exceeds per_subagent {budget['per_subagent']:,} "
+            if src != "main" and b["budgeted"] > budget["per_subagent"]:
+                res.add("USE-011", BLOCK, f"subagent {src}: {b['budgeted']:,} {metric} exceeds per_subagent {budget['per_subagent']:,} "
                         "(split its batch; brief it from packets/FACTS.md, not the source tree)")
             if b["peak_context"] > budget["context_warn"]:
                 fix = ("/compact or resume in a new session (crewline task resume)" if src == "main"
                        else "smaller batch; start a fresh subagent with a packet instead of SendMessage")
                 res.add("USE-012", WARN, f"{src}: context reached {b['peak_context']:,} "
                         f"(context_warn {budget['context_warn']:,}); every call re-reads it: {fix}")
-        if overall["total"] > budget["per_task"]:
-            res.add("USE-003", BLOCK, f"task total {overall['total']:,} exceeds budget {budget['per_task']:,} "
+        if overall["budgeted"] > budget["per_task"]:
+            res.add("USE-003", BLOCK, f"task {metric} {overall['budgeted']:,} exceeds budget {budget['per_task']:,} "
                     "(core/usage-budget.yaml). WAITING_FOR_USER: continue (exception token_budget) / split / abort")
         for stage, b in by_stage.items():
             cap = int(budget["hot_states"].get(stage, budget["per_state"]))
-            if b["total"] > cap:
-                res.add("USE-004", BLOCK, f"{stage}: {b['total']:,} exceeds per-state budget {cap:,} "
+            if stage in WAIT_STATES:
+                continue
+            if b["budgeted"] > cap:
+                res.add("USE-004", BLOCK, f"{stage}: {b['budgeted']:,} {metric} exceeds per-state budget {cap:,} "
                         "(do not re-read core, do not poll, do not paste reports)")
-            elif b["total"] > cap * budget["warn_ratio"]:
-                res.add("USE-005", WARN, f"{stage}: {b['total']:,} is past {budget['warn_ratio']:.0%} of budget {cap:,}")
+            elif b["budgeted"] > cap * budget["warn_ratio"]:
+                res.add("USE-005", WARN, f"{stage}: {b['budgeted']:,} {metric} is past {budget['warn_ratio']:.0%} of budget {cap:,}")
     hist = doc.get("state_history") or []
     marks = doc.get("usage_marks") or []
     if hist and not marks:
@@ -261,14 +284,16 @@ def report(manifest_path: str, transcripts: list[str], out: str | None = None) -
     data = {"task_id": doc.get("task_id"), "generated_at": now_iso(), "window": [doc["started_at"], doc.get("finished_at")],
             "budget": budget,
             "overall": overall, "by_stage": by_stage, "by_step": by_step, "by_agent": by_agent,
-            "note": "fresh = input + cache_write + output; total adds cache_read (re-read context)."}
+            "note": (f"fresh = input + cache_write + output; total adds cache_read (re-read context); weighted = fresh + "
+                     f"cache_read x {weight:g}. Budgets use {metric}; budgeted leaves out waited (time waiting on a person).")}
     target = Path(out) if out else Path(manifest_path).with_name("usage.json")
     target.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     md = target.with_suffix(".md")
     md.write_text(to_markdown(data), encoding="utf-8")
     res.inputs.update(overall=overall, report=str(md))
-    res.summary = (f"{overall['calls']} calls, fresh {overall['fresh']:,} / total {overall['total']:,} tokens "
-                   f"(output {overall['output']:,}); {md}")
+    res.summary = (f"{overall['calls']} calls, fresh {overall['fresh']:,} / weighted {overall['weighted']:,} / "
+                   f"total {overall['total']:,} tokens (output {overall['output']:,}; budgeted {metric} "
+                   f"{overall['budgeted']:,}, waiting on a person {overall['waited']:,}); {md}")
     for stage, b in by_stage.items():
         res.add("USE-STAGE", INFO, f"{stage}: {b['calls']} calls, fresh {b['fresh']:,}, total {b['total']:,}")
     return res.finish()
@@ -276,11 +301,12 @@ def report(manifest_path: str, transcripts: list[str], out: str | None = None) -
 
 def to_markdown(data: dict) -> str:
     def table(title: str, rows: dict) -> str:
-        lines = [f"### {title}", "", "| | calls | input | cache write | cache read | output | fresh | total |",
-                 "|---|---:|---:|---:|---:|---:|---:|---:|"]
+        lines = [f"### {title}", "", "| | calls | input | cache write | cache read | output | fresh | weighted | total "
+                 "| waited |", "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
         for name, b in rows.items():
             lines.append(f"| {name} | {b['calls']} | {b['input']:,} | {b['cache_write']:,} | {b['cache_read']:,} | "
-                         f"{b['output']:,} | {b['fresh']:,} | {b['total']:,} |")
+                         f"{b['output']:,} | {b['fresh']:,} | {b.get('weighted', 0):,} | {b['total']:,} | "
+                         f"{b.get('waited', 0):,} |")
         return "\n".join(lines) + "\n"
     return (f"# Token usage - {data['task_id']}\n\nWindow {data['window'][0]} -> {data['window'][1] or 'now'} "
             f"(generated {data['generated_at']}). {data['note']}\n\n"

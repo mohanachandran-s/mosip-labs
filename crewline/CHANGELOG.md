@@ -9,6 +9,32 @@ because Claude Code updates an installed plugin only when that version changes. 
   changed for them.
 - **MAJOR**: a change that can break a task in progress (state machine, manifest schema). Finish or restart open tasks.
 
+## 0.8.2
+Lessons from MAT-ONBOARD (onboarding the DSL TestRig repository mosip-automation-tests). Budgets now count tokens by
+weight, so a task stops later than before; nothing that passed now fails.
+- **Token budget counts what it costs:** `core/usage-budget.yaml` `metric: weighted` = fresh + cache_read x 0.1, with caps
+  recalibrated (per task 3M, per state 0.8M, per subagent 0.5M weighted; about 25M / 6.5M / 4M total at the pilots'
+  ratio). MAT-ONBOARD INTAKE stopped at 2.51M total and IMPACT_ANALYSIS at 3.6M, almost all re-read context. Calls in
+  WAITING_FOR_USER or in a step marked `wait: ...` are reported as `waited` and never count against a cap.
+  `metric: total` restores the old count. `usage.md` gains weighted and waited columns.
+- **`crewline run --stall <min>`:** stops a run whose log has not grown for N minutes (a build that started Tomcat and
+  waited on it for 15+ minutes). EVD-005 now names it.
+- **`crewline discover`:** argLine counts only in surefire/failsafe (a compiler-plugin argLine raised a false DSC-001);
+  JaCoCo declared only in pluginManagement is reported as not running (DSC-002); Cucumber alone no longer makes a UI-test
+  project (a browser driver does); a DSL TestRig (TestRunner + scenario sheet / dslrig package) is the system-test
+  project, not a service (DSC-011); `.crewline-work/` task worktrees are no longer scanned (they doubled the module
+  count); `--base` warns when discovery reads another commit than the task base and lists the guidance files that
+  differ (DSC-012).
+- **`crewline gates refresh` decides `onboarding_discovery` and `onboarding_baseline`** (ONB-001..007): discovery and its
+  drafts present and on the base; owner approval `onboarding_review`; reviewed profile when api-test exists; baseline
+  build record passed.
+- **`crewline tracker waive`** records `tracker.waived` / `--subtasks` `tracker.subtasks_waived` (was a hand edit).
+- **`crewline task close --id <id> --report <file>`** records `final_report_ref`, removes clean worktrees, keeps
+  `open_worktrees` current and applies FINAL_REPORT -> DONE. `crewline status` with no active task shows the most recent
+  one (it returned NOT_RUN right after DONE).
+- **VER-005:** every command warns on stderr when it runs from a plugin-cache copy that has a newer version beside it
+  (the session ran 0.7.2 by full path with 0.8.0 installed). The skill tells the agent to ask for a session restart.
+
 ## 0.8.1
 Documentation only; no rule changes. README brought up to 0.8.0 with pictures: what's new, the guard's decision flow, the
 full-regression decisions (run, reuse the user's base, waive, fix, defer) as section 7.2, where run reports go, the task

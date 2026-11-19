@@ -22,7 +22,7 @@ from pathlib import Path
 import yaml
 
 from . import (branch, branch_env, change_scope, ci_coverage, coding_standards, dco, defect_reports, evidence, manifest, migration,
-               requirement_clarity, requirement_fit, robustness, secrets_scan, test_integrity, traceability)
+               onboarding, requirement_clarity, requirement_fit, robustness, secrets_scan, test_integrity, traceability)
 from .gitio import changed_files, head
 from .result import BLOCK, INFO, Result
 
@@ -32,6 +32,8 @@ REPO_LESS = {
     "defect_reports": defect_reports.run,
     "traceability": traceability.run,
     "ci_coverage": ci_coverage.run,
+    "onboarding_discovery": onboarding.discovery_gate,
+    "onboarding_baseline": onboarding.baseline_gate,
 }
 RECORDS = {
     "build": "build*.json",

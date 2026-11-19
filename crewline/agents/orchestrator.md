@@ -46,8 +46,8 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
     issue type story/bug/task). The chosen system's tool missing (`gh auth status`; `jira_connector`) -> WAITING_FOR_USER
     with its numbered enable steps. Draft title + body from the brief and ACs (templates/issue-template.md), show it, and
     create it only on a single-use approval `create_tracker_item` (`gh issue create` / `createJiraIssue`); record
-    `created_by_crewline: true`, `found_by: created`. (d) The user declines -> `tracker.waived` (action `tracker_waiver`,
-    approver, reason, scope, timestamp). Never confirm, create or waive on the user's behalf.
+    `created_by_crewline: true`, `found_by: created`. (d) The user declines -> `crewline tracker waive --approver <who> --reason <why>`
+    (`--subtasks` for subtasks); never hand-edit `tracker.waived`. Never confirm, create or waive on the user's behalf.
     GITHUB_PLANNING (templates that walk it): one subtask per kind the template lists (`subtasks`, default
     `core/workflow.yaml` `subtask_kinds`: testcase, implementation, testing, review, pr) under `tracker.key` in the same
     system (GitHub sub-issue / Jira sub-task). Link existing ones, or draft them (templates/subtask-template.md), show
@@ -76,9 +76,10 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
    (at `<clone>/.crewline-work/worktrees/<task-id>`; it excludes `.crewline-work/` locally, enables the plugin there, and records it; ADR-0009), and
    tell the user to open the session in that folder: it finds its task and the module's context by itself. A base checkout for base-vs-branch runs is
    `<clone>/.crewline-work/worktrees/<task-id>-base` (`--detach`) and is removed as soon as the base run is recorded. Record every worktree in
-   `workspace.worktrees` and keep `workspace.open_worktrees` current. At task close (before DONE) remove each one with
-   `git worktree remove` (refuse if it has uncommitted changes; ask), then `git worktree prune`; the branch and PR stay, and a
-   later review comment just re-adds the worktree. **Single-checkout mode** (`workspace.checkout_mode: single`, only when the
+   `workspace.worktrees` and keep `workspace.open_worktrees` current. At task close run
+   `crewline task close --id <id> --report <task>/final-report.md`: it records `final_report_ref`, removes every clean
+   worktree (a dirty one is kept and named: ask), and applies FINAL_REPORT -> DONE. The branch and PR stay, and a later
+   review comment just re-adds the worktree. After DONE, `crewline status` still shows the last task. **Single-checkout mode** (`workspace.checkout_mode: single`, only when the
    user asks): work in the main clone by switching branches, allowed only while `git status --porcelain` is empty there,
    never stash; record the user's original branch and switch back at the end.
 4. Fork model: before REPO_READY **ask the upstream base branch** (approval `base_branch`), create the worktree from that upstream ref, record `upstream_remote`, `upstream_repo`, `base_branch`, `base_commit`. Push to `origin`; PR to `<upstream_repo>:<base_branch>`; `crewline branch` must PASS first.
@@ -107,8 +108,9 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
     state without the file fails SYS-001; without a run of a suite the module declares in `.crewline/module.yaml` it
     fails SYS-002, and a change to a UI project without a UI rig run fails SYS-003. QUALITY_GATE -> COMMIT_PR needs
     `crewline regression --out <task>/evidence/full-regression[-<suite>].json` comparing those suites (REG-007/008).
-    Every suite run goes through `crewline run ... --timeout <min> --fail-on '<login failure regex>'` (a TestRig whose
-    login gets a 401 hangs; stop it, do not wait). The run keeps its reports in `<task>/evidence/reports/<record>/`:
+    Every suite run goes through `crewline run ... --stall <min> --fail-on '<login failure regex>'` (a TestRig whose
+    login gets a 401 hangs, a build that starts a server never ends; `--stall` stops a run whose log stopped growing,
+    `--timeout` only when the whole duration is known). A baseline build gets `--stall 10` too. The run keeps its reports in `<task>/evidence/reports/<record>/`:
     point the user there, never at the worktree's `testng-report/`.
     Before running the base, ask once: "do you have a recent full run of the base on this environment?". If yes, use
     that report: `crewline regression --baseline <their report dir> --baseline-from-user --approver <who> ...` (REG-010

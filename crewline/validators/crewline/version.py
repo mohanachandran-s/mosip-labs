@@ -10,6 +10,11 @@ ships without a bump stays invisible on machines that already have Crewline.
   VER-002  VERSION and .claude-plugin/plugin.json disagree                                                 BLOCK
   VER-003  version is not MAJOR.MINOR.PATCH                                                                BLOCK
   VER-004  the version (and, with --base, the base version and the shipped files that changed)            INFO
+  VER-005  this copy runs from the plugin cache but a newer version sits beside it: the session (or a
+           full-path call) uses a stale Crewline; restart the session after `/plugin update`                WARN
+
+Every command prints the VER-005 line on stderr, so a session that started before the plugin was installed or
+updated (MAT-ONBOARD ran the 0.7.2 CLI by full path with 0.8.0 installed) finds out on its first call.
 """
 from __future__ import annotations
 
@@ -18,7 +23,7 @@ import re
 from pathlib import Path
 
 from .gitio import git
-from .result import BLOCK, INFO, Result
+from .result import BLOCK, INFO, WARN, Result
 
 CORE = Path(__file__).resolve().parents[2]
 PLUGIN = Path(".claude-plugin/plugin.json")
@@ -38,9 +43,27 @@ def _key(v: str) -> tuple[int, ...] | None:
     return tuple(int(x) for x in m.groups()) if m else None
 
 
+def stale_install(core: Path = CORE) -> str:
+    """'' or a one-line warning when <cache>/<marketplace>/crewline/<ver>/ has a higher sibling version."""
+    core = core.resolve()
+    if "cache" not in core.parts or not _key(core.name):
+        return ""
+    mine = _key(current(core)) or _key(core.name)
+    newer = [d for d in core.parent.iterdir() if d.is_dir() and _key(d.name) and _key(d.name) > mine
+             and (d / PLUGIN).is_file()]
+    if not newer:
+        return ""
+    best = max(newer, key=lambda d: _key(d.name))
+    return (f"VER-005 running Crewline {core.name} from the plugin cache, but {best.name} is installed beside it: "
+            f"restart the session so it loads {best.name} (do not call an older copy by full path)")
+
+
 def run(repo: str | None = None, base: str | None = None, core: Path = CORE) -> Result:
     v = current(core)
     res = Result("version", inputs={"version": v, "base": base or ""})
+    stale = stale_install(core)
+    if stale:
+        res.add("VER-005", WARN, stale[len("VER-005 "):])
     if not _key(v):
         res.add("VER-003", BLOCK, f"plugin.json version {v!r} is not MAJOR.MINOR.PATCH", path=str(PLUGIN))
     vf = core / "VERSION"

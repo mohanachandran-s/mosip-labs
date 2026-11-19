@@ -29,7 +29,12 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
 
 ## Procedure
 
-1. Run `python -m crewline discover --repo <path> --module <name>`. It is read-only on the repository.
+1. Run `python -m crewline discover --repo <path> --module <name> --base <the task's base branch>` on a checkout of that
+   base. It is read-only on the repository. DSC-012 means the checkout is another commit: guidance files differ between
+   branches (AGENTS.md on develop, not on release-1.6.x), so re-run on the base before trusting a draft.
+   DSC-011 names a DSL TestRig: it is the system-test project, not a service. `crewline gates refresh` then decides
+   `onboarding_discovery` and, after the owner's `onboarding_review` approval, `onboarding_baseline`; never write either
+   gate by hand.
 2. Read every guidance file it reports (DSC-006). Where they disagree with a draft, the repository wins: correct the draft.
 3. Verify the Inferred commands by running them once in a throw-away worktree through `crewline run`:
    build, unit tests, coverage (`jacoco:report`). Mark each Verified with the evidence path, or record why it fails.

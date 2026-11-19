@@ -94,6 +94,23 @@ def approval_add(path: str, action: str, approver: str, reason: str, scope: str,
     return _save(path, doc, res, f"{'exception' if exception else 'approval'} {action} by {approver}")
 
 
+def tracker_waive(path: str, approver: str, reason: str, scope: str, subtasks: bool = False) -> Result:
+    """The user declined a ticket (or the subtasks): tracker.waived / tracker.subtasks_waived (MAN-017 / MAN-018)."""
+    field, action = ("subtasks_waived", "subtasks_waiver") if subtasks else ("waived", "tracker_waiver")
+    res = Result("tracker-waive", inputs={"manifest": path, "field": field, "approver": approver})
+    if _is_agent(approver):
+        res.add("MAN-010", BLOCK, f"{approver!r} is an agent: only the user can decline a ticket")
+        return res.finish()
+    doc = _load(path)
+    t = doc.setdefault("tracker", {})
+    if not subtasks and t.get("key"):
+        res.add("REC-001", BLOCK, f"tracker already links {t['key']}: a ticket is either linked or waived, not both")
+        return res.finish()
+    t[field] = {"action": action, "approver": approver, "approver_type": "human", "reason": reason, "scope": scope,
+                "timestamp": _now()}
+    return _save(path, doc, res, f"{field} by {approver}")
+
+
 def limitation_add(path: str, lim_id: str, text: str | None = None, refs: list[str] | None = None,
                    follow_up: str | None = None, no_follow_up: str | None = None) -> Result:
     """Add a known limitation, or re-run with the same id to link its follow-up (MAN-019 needs one by FINAL_REPORT)."""
@@ -114,10 +131,19 @@ def limitation_add(path: str, lim_id: str, text: str | None = None, refs: list[s
     return _save(path, doc, res, f"{lim_id} recorded" + ("" if linked else "; it still needs a follow-up before FINAL_REPORT (MAN-019)"))
 
 
-def status(path: str) -> Result:
-    """What the orchestrator reads before offering options, so it never offers a choice the workflow forbids."""
+def status(path: str, closed: bool = False) -> Result:
+    """What the orchestrator reads before offering options, so it never offers a choice the workflow forbids.
+    `closed`: no task is active and this is the most recent one (a just-finished task still answers `status`)."""
     res = Result("status", inputs={"manifest": path})
     doc = _load(path)
+    if closed or doc.get("current_state") == "DONE":
+        wsp = doc.get("workspace") or {}
+        open_trees = [w.get("path") for w in wsp.get("worktrees") or [] if not w.get("removed_at")]
+        res.add("STS-002", INFO, f"{doc.get('task_id')}: {doc.get('task_type')} {doc.get('current_state')} {doc.get('outcome')}"
+                f" (closed, no active task); report {doc.get('final_report_ref') or 'not recorded'}; open worktrees: "
+                f"{', '.join(open_trees) or 'none'}" + ("; `crewline task close` records the report and removes them"
+                                                      if open_trees or not doc.get('final_report_ref') else ""))
+        return res.finish()
     ctx = manifest.Ctx(doc)
     src = doc.get("current_state")
     rep = doc.get("repair") or {}

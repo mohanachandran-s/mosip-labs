@@ -17,13 +17,14 @@ gates:
   onboarding_discovery:
     state: IMPACT_ANALYSIS
     enforced_by: deterministic
-    commands: ["discover --repo <module repo> --module <name>"]
+    commands: ["discover --repo <module repo> --module <name> --base <base>", "gates refresh (ONB-001..003)"]
     requires: [discovery.json + drafts written, every guidance file reported (DSC-006) read, DSC-001/002 coverage warnings carried into the drafts]
 
   onboarding_baseline:
     state: KNOWLEDGE_UPDATE
     enforced_by: deterministic+review
-    commands: ["testcase --scope all with the reviewed profile", "tools", "migration conventions recorded"]
+    commands: ["testcase --scope all with the reviewed profile", "tools", "migration conventions recorded",
+               "run --stall 10 --out <task>/evidence/baseline-build.json", "gates refresh (ONB-004..007)"]
     requires: [reviewed profile in <module repo>/.crewline/qa/profile.yaml, baseline findings recorded as existing debt, Inferred rows confirmed or left Inferred with a reason, approval onboarding_review]
 
   # --- requirements and design ------------------------------------------------------------------------
