@@ -1,0 +1,24 @@
+environment_name: dev            # shown in reports and Slack
+public_url: null                 # e.g. https://roottrace.dev.example.net (Slack "Full report" link)
+
+loki:
+  url: http://loki-gateway.cattle-logging-system.svc:80   # in-cluster; or your external Loki URL
+  username: null                 # basic auth, or use bearer_token; secrets via ROOTTRACE_* env vars
+  bearer_token: null
+  org_id: null                   # X-Scope-OrgID if Loki is multi-tenant
+  verify_tls: true
+  max_lines: 200000
+
+k8s:
+  enabled: true
+  kubeconfig: null               # path to a Rancher kubeconfig when running outside the cluster
+  context: null
+
+namespaces: []                   # empty = all except exclude_namespaces
+service_label: app               # Loki label that names the service
+include_warn: false
+baseline_offset: 24h             # compare against the same window yesterday (try 7d for weekly patterns)
+spike_factor: 3.0
+critical_score: 50
+catalog_paths: []                # extra team catalogs, e.g. [/etc/roottrace/mosip-known-issues.yaml]
+slack_webhook: null              # prefer ROOTTRACE_SLACK_WEBHOOK

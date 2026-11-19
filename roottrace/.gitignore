@@ -1,0 +1,20 @@
+cat > roottrace/.gitignore <<'EOF'
+# Python / local env
+.venv/
+__pycache__/
+*.egg-info/
+# IDE
+.idea/
+*.iml
+.vscode/
+# Generated reports (may contain real environment data)
+roottrace-out/
+sample-out/
+# Local config and cluster credentials: never commit
+config.yaml
+config.yml
+*kubeconfig*
+/*.yaml
+/*.yml
+!/config.example.yaml
+EOF

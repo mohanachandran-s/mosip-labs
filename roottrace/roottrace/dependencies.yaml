@@ -1,0 +1,138 @@
+# Starter MOSIP dependency map — VERIFY against your deployment and extend via `dependency_map_paths`.
+# A node = one component. match.namespace / match.app are regexes against Loki labels and pod names
+# (app is optional; more specific nodes must come first). `mentions` = regex for log text that refers
+# to this component (used to discover real dependencies from error messages). `depends_on` = what it calls.
+# `checks` = extra troubleshooting hints (generic kubectl checks are added automatically).
+nodes:
+  # ---------------- infrastructure ----------------
+  - name: keycloak
+    kind: infra
+    match: {namespace: "keycloak|iam"}
+    mentions: "keycloak|OIDC|openid|/auth/realms|/realms/"
+    depends_on: [postgres]
+    checks: ["Check realm/clients in the Keycloak admin console; verify client secrets match the config server."]
+  - name: postgres
+    kind: infra
+    match: {namespace: "postgres"}
+    mentions: "postgres|PSQLException|jdbc:postgresql|HikariPool|could not open JDBC"
+    checks: ["kubectl -n postgres exec -it <pod> -- psql -U postgres -c \"select count(*) from pg_stat_activity\"  (connection count vs max_connections)"]
+  - name: softhsm
+    kind: infra
+    match: {namespace: "softhsm"}
+    mentions: "softhsm|\\bHSM\\b|PKCS11|CKR_"
+  - name: activemq
+    kind: infra
+    match: {namespace: "activemq"}
+    mentions: "activemq|artemis|JMSException"
+    checks: ["If only the slave crash-loops, check the master/slave shared-storage or journal lock and the PVC."]
+  - name: kafka
+    kind: infra
+    match: {namespace: "kafka"}
+    mentions: "\\bkafka\\b|Broker may not be available"
+  - name: minio
+    kind: infra
+    match: {namespace: "minio|s3"}
+    mentions: "minio|AmazonS3|NoSuchBucket|object ?store"
+  - name: config-server
+    kind: infra
+    match: {namespace: "config-server"}
+    mentions: "config-server|PropertySource"
+  - name: clamav
+    kind: infra
+    match: {namespace: "clamav"}
+    mentions: "clamav|virus ?scan"
+  - name: mock-smtp
+    kind: infra
+    match: {namespace: "mock-smtp|smtp"}
+    mentions: "mock-smtp|MailSendException|smtp"
+
+  # ---------------- kernel ----------------
+  - name: authmanager
+    match: {namespace: "kernel", app: "authmanager"}
+    mentions: "authmanager|auth ?service|KER-ATH"
+    depends_on: [keycloak, config-server]
+  - name: auditmanager
+    match: {namespace: "kernel", app: "auditmanager"}
+    mentions: "auditmanager"
+    depends_on: [postgres, authmanager]
+  - name: notifier
+    match: {namespace: "kernel", app: "notifier"}
+    mentions: "notifier|notification"
+    depends_on: [mock-smtp, authmanager, config-server]
+  - name: otpmanager
+    match: {namespace: "kernel", app: "otpmanager"}
+    mentions: "otpmanager|KER-OTP"
+    depends_on: [postgres, notifier, authmanager]
+  - name: masterdata
+    match: {namespace: "kernel|masterdata", app: "masterdata"}
+    mentions: "masterdata|KER-MSD"
+    depends_on: [postgres, authmanager, config-server]
+  - name: syncdata
+    match: {namespace: "kernel|syncdata", app: "syncdata"}
+    mentions: "syncdata|KER-SNC"
+    depends_on: [masterdata, keymanager, authmanager, postgres]
+  - name: kernel-idgenerators
+    match: {namespace: "kernel", app: "idgenerator|ridgenerator|pridgenerator"}
+    depends_on: [postgres, authmanager]
+
+  # ---------------- core services ----------------
+  - name: keymanager
+    match: {namespace: "keymanager"}
+    mentions: "keymanager|KER-KMS|KER-CRY"
+    depends_on: [softhsm, postgres, authmanager, config-server]
+  - name: websub
+    match: {namespace: "websub"}
+    mentions: "websub|hub\\.mode|hub\\.topic|Publisher is not authorized|KER-WSC"
+    depends_on: [kafka, authmanager]
+  - name: idrepo-credentialrequest
+    match: {namespace: "idrepo", app: "credentialrequest"}
+    mentions: "credentialrequest|credential-request"
+    depends_on: [postgres, idrepo-credential, websub, authmanager]
+  - name: idrepo-credential
+    match: {namespace: "idrepo|credential", app: "^credential$|credential-service"}
+    mentions: "credential-service|IDR-CRS"
+    depends_on: [keymanager, datashare, idrepo-identity, pms, authmanager]
+  - name: idrepo-identity
+    match: {namespace: "idrepo"}
+    mentions: "idrepo|identity ?service|IDR-IDC|IDR-IDS"
+    depends_on: [postgres, keymanager, websub, authmanager, minio]
+  - name: datashare
+    match: {namespace: "datashare"}
+    mentions: "datashare|DAT-SER"
+    depends_on: [minio, keymanager, pms, authmanager]
+  - name: pms
+    match: {namespace: "pms"}
+    mentions: "\\bpms\\b|partner(manag|-?service)|policy(manag|-?service)|PMS_"
+    depends_on: [postgres, keymanager, authmanager, websub]
+  - name: ida
+    match: {namespace: "ida"}
+    mentions: "\\bida\\b|id-authentication|IDA-"
+    depends_on: [idrepo-identity, keymanager, authmanager, postgres, websub, kafka, otpmanager]
+  - name: resident
+    match: {namespace: "resident"}
+    mentions: "resident ?service|RES-SER"
+    depends_on: [ida, idrepo-identity, keymanager, authmanager, websub, notifier, postgres]
+  - name: packetmanager
+    match: {namespace: "packetmanager"}
+    mentions: "packetmanager|KER-PUT"
+    depends_on: [minio, keymanager, authmanager]
+  - name: regproc
+    match: {namespace: "regproc"}
+    mentions: "regproc|registration ?processor|RPR-"
+    depends_on: [activemq, kafka, packetmanager, idrepo-identity, keymanager, authmanager, postgres, clamav]
+  - name: prereg
+    match: {namespace: "prereg"}
+    mentions: "pre-?registration|PRG_"
+    depends_on: [postgres, authmanager, keymanager, notifier, masterdata]
+  - name: admin
+    match: {namespace: "admin"}
+    mentions: "admin-service|ADM-"
+    depends_on: [masterdata, authmanager, keymanager, postgres]
+  - name: print
+    match: {namespace: "print"}
+    depends_on: [websub, datashare, keymanager]
+
+  # ---------------- test rigs (nothing depends on them) ----------------
+  - name: testrigs
+    kind: test
+    match: {namespace: "apitestrig|uitestrig|dslrig|dsl"}

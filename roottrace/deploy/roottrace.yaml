@@ -1,0 +1,95 @@
+# kubectl apply -f deploy/roottrace.yaml   (or import via Rancher "Import YAML")
+# Edit: image, config.yaml (Loki URL / environment_name / public_url), and the Secret values.
+apiVersion: v1
+kind: Namespace
+metadata: {name: roottrace}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: roottrace, namespace: roottrace}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: roottrace-readonly}
+rules:
+  - apiGroups: [""]
+    resources: [namespaces, pods, events]
+    verbs: [get, list]
+  - apiGroups: [apps]
+    resources: [replicasets]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: roottrace-readonly}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: roottrace-readonly}
+subjects: [{kind: ServiceAccount, name: roottrace, namespace: roottrace}]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: roottrace-config, namespace: roottrace}
+data:
+  config.yaml: |
+    environment_name: dev
+    loki:
+      url: http://loki-gateway.cattle-logging-system.svc:80
+    k8s:
+      enabled: true
+    baseline_offset: 24h
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: roottrace-secrets, namespace: roottrace}
+type: Opaque
+stringData:
+  ROOTTRACE_SLACK_WEBHOOK: ""
+  ROOTTRACE_LOKI_USER: ""
+  ROOTTRACE_LOKI_PASSWORD: ""
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: roottrace, namespace: roottrace}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: roottrace}}
+  template:
+    metadata: {labels: {app: roottrace}}
+    spec:
+      serviceAccountName: roottrace
+      containers:
+        - name: roottrace
+          image: REGISTRY/roottrace:0.1.0
+          ports: [{containerPort: 8080}]
+          envFrom: [{secretRef: {name: roottrace-secrets}}]
+          volumeMounts: [{name: cfg, mountPath: /etc/roottrace}]
+          readinessProbe: {httpGet: {path: /health, port: 8080}}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 1Gi}
+      volumes: [{name: cfg, configMap: {name: roottrace-config}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: roottrace, namespace: roottrace}
+spec:
+  selector: {app: roottrace}
+  ports: [{port: 80, targetPort: 8080}]
+---
+# Continuous mode: every 30 min scan the last 30 min; post to Slack only when unhealthy.
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: roottrace-scan, namespace: roottrace}
+spec:
+  schedule: "*/30 * * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:8.10.1
+              args: ["-sf", "--max-time", "600",
+                     "http://roottrace.roottrace.svc/scan?since=30m&slack=1&only_if=unhealthy"]

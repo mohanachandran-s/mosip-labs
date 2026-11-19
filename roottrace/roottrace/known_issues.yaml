@@ -1,0 +1,148 @@
+# Built-in starter catalog. Add team-specific entries in a separate file and list it under
+# `catalog_paths` in config.yaml. Every entry: id, title, severity, match.regex (+ optional
+# match.service), cause, fix, owner. `scope: k8s` entries match Kubernetes pod/event findings.
+issues:
+  - id: DB-001
+    title: Database connection failure
+    severity: critical
+    match: {regex: "(Connection to \\S+ refused|PSQLException|could not open JDBC Connection|HikariPool.*(timeout|not available)|too many clients)"}
+    cause: Service cannot reach Postgres, or the connection pool is exhausted.
+    fix: Check the postgres pod/statefulset health, the DB secret/password, max_connections, and the service's Hikari pool size.
+    owner: devops
+
+  - id: AUTH-001
+    title: Auth token rejected / expired (401/403)
+    severity: high
+    match: {regex: "(401 Unauthorized|403 Forbidden|KER-ATH-40[13]|invalid_token|Token expired|JWT expired|invalid_client)"}
+    cause: Expired or invalid token, client secret mismatch with Keycloak, or a role missing for the client.
+    fix: Verify the client ID/secret in the config server vs Keycloak, check clock skew, and check role mapping for the calling client.
+    owner: devops
+
+  - id: AUTH-002
+    title: Cannot reach auth service / OIDC (Keycloak)
+    severity: high
+    match: {regex: "(Error connecting to OIDC service|Problem in connecting to auth service|KER-ATH-50\\d|keycloak.*(refused|timed out|unavailable|50[234]))"}
+    cause: Services cannot reach authmanager or the Keycloak OIDC endpoint, or their client credentials are rejected. When several services report it at once, the problem is authmanager or Keycloak, not the services.
+    fix: Check the authmanager and keycloak pods and their recent restarts, the Keycloak URL in the config server, and the clientId/secret of the affected services.
+    owner: devops
+
+  - id: WEBSUB-001
+    title: WebSub publisher not authorized
+    severity: medium
+    match: {regex: "(Publisher is not authorized|hub\\.mode=denied|KER-WSC-10\\d)"}
+    cause: The WebSub hub denies topic registration or publishing for the client. This is usually a missing publish role for that topic on the service's Keycloak client, so events (notifications, credential/auth status) won't flow.
+    fix: Check the publishing service's Keycloak client role mappings for the topic named in the error, and the websub hub's auth config. Restart the publisher after fixing so it registers again.
+    owner: devops
+
+  - id: KEYM-001
+    title: Key manager / HSM failure
+    severity: critical
+    match: {regex: "(KER-KMS|keymanager|HSM|softhsm|PKCS11|CKR_|No unique key alias|Certificate (not found|expired))"}
+    cause: Key manager cannot reach the HSM, or a key/certificate is missing or expired for the app ID / reference ID.
+    fix: Check the softhsm/HSM pod, the keymanager logs, and the key generation/upload status for the app ID / reference ID in the error.
+    owner: devops
+
+  - id: MQ-001
+    title: Message broker connection failure (Kafka / ActiveMQ)
+    severity: high
+    match: {regex: "(org\\.apache\\.kafka.*(TimeoutException|DisconnectException)|Connection to node -?\\d+ .* could not be established|JMSException|ActiveMQ.*(refused|closed)|ActiveMQ\\w*Exception|artemis.*(disconnect|failed)|Broker may not be available)"}
+    cause: The broker is unavailable or unreachable from the service.
+    fix: Check the kafka/activemq pods, the PVC disk usage, and the broker address in the service config.
+    owner: devops
+
+  - id: OBJ-001
+    title: Object store (MinIO / S3) failure
+    severity: high
+    match: {regex: "(AmazonS3Exception|MinioException|NoSuchBucket|S3 .*(refused|timed out)|object store)"}
+    cause: The object store is down, the bucket is missing, or credentials are wrong.
+    fix: Check the MinIO pod and disk, the bucket existence, and the access key/secret in the config.
+    owner: devops
+
+  - id: NET-001
+    title: DNS / service discovery failure
+    severity: high
+    match: {regex: "(UnknownHostException|Name or service not known|NXDOMAIN|No route to host)"}
+    cause: The target service is not resolvable — wrong hostname in config, or the service/pod is not running.
+    fix: Check that the referenced Kubernetes service exists and has endpoints (kubectl get endpoints), and check CoreDNS.
+    owner: devops
+
+  - id: NET-002
+    title: Downstream call timeout / refused
+    severity: medium
+    match: {regex: "(SocketTimeoutException|Read timed out|Connect(ion)? timed out|ConnectException: Connection refused|ResourceAccessException|503 Service Unavailable|504 Gateway)"}
+    cause: A downstream service is slow, restarting, or not ready.
+    fix: Correlate with pod restarts in the Kubernetes section; check the downstream service's readiness and its own errors.
+    owner: dev
+
+  - id: TLS-001
+    title: TLS / certificate problem
+    severity: high
+    match: {regex: "(SSLHandshakeException|PKIX path building failed|certificate (has )?expired|unable to find valid certification path)"}
+    cause: Untrusted or expired certificate between services or to an external endpoint.
+    fix: Check the certificate expiry on the ingress or endpoint, and the truststore contents.
+    owner: devops
+
+  - id: CFG-001
+    title: Config server / property resolution failure
+    severity: high
+    match: {regex: "(Could not resolve placeholder|Could not locate PropertySource|config-server|BeanCreationException|APPLICATION FAILED TO START)"}
+    cause: A missing property, an unreachable config server, or a bad property value at startup.
+    fix: Diff the service's properties in the config repo against the release notes; check that the config-server pod is healthy.
+    owner: dev
+
+  - id: MEM-001
+    title: Java out of memory
+    severity: critical
+    match: {regex: "(OutOfMemoryError|GC overhead limit exceeded|Java heap space|Metaspace)"}
+    cause: Heap is too small for the load, or a memory leak.
+    fix: Check the container memory limit vs -Xmx, and the restart count; capture a heap dump if it recurs.
+    owner: dev
+
+  - id: NOTIF-001
+    title: Notification / OTP delivery failure
+    severity: medium
+    match: {regex: "(OTP.*(fail|not sent|error)|notifier|SMS.*(fail|error)|MailSendException|IDA-OTA-)"}
+    cause: The notification channel (SMS/email/mock notifier) is failing or misrouted; OTP-based test flows will hang.
+    fix: Check the notifier and mock-smtp pods and their routing config; confirm OTP templates exist.
+    owner: devops
+
+  # ---- Kubernetes-scope signatures (match pod/event findings) ----
+  - id: K8S-OOM
+    scope: k8s
+    title: Container OOMKilled
+    severity: critical
+    match: {regex: "OOMKilled"}
+    cause: The container exceeded its memory limit.
+    fix: Raise the limit or tune -Xmx/-XX:MaxRAMPercentage; check for a leak if it repeats.
+
+  - id: K8S-CRASH
+    scope: k8s
+    title: CrashLoopBackOff
+    severity: critical
+    match: {regex: "CrashLoopBackOff|Back-off restarting failed container"}
+    cause: The app fails at startup repeatedly.
+    fix: Check this service's first ERROR template in the report — usually a config, DB, or dependency failure at boot.
+
+  - id: K8S-IMAGE
+    scope: k8s
+    title: Image pull failure
+    severity: high
+    match: {regex: "ImagePullBackOff|ErrImagePull|manifest unknown"}
+    cause: Wrong image tag, a registry auth problem, or a rate limit.
+    fix: Verify the image tag exists and the imagePullSecret.
+
+  - id: K8S-PROBE
+    scope: k8s
+    title: Readiness / liveness probe failing
+    severity: medium
+    match: {regex: "(Readiness|Liveness|Startup) probe failed"}
+    cause: The service is slow to start or unhealthy; a liveness failure causes restarts.
+    fix: Check startup time vs initialDelaySeconds, and the actuator health of dependencies.
+
+  - id: K8S-STORAGE
+    scope: k8s
+    title: Volume / storage problem
+    severity: high
+    match: {regex: "(FailedMount|FailedAttachVolume|disk pressure|DiskPressure|no space left|Evicted)"}
+    cause: A PVC failed to mount, or the node or disk is full.
+    fix: Check Longhorn/storage class health and node disk usage.
