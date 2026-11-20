@@ -9,6 +9,25 @@ because Claude Code updates an installed plugin only when that version changes. 
   changed for them.
 - **MAJOR**: a change that can break a task in progress (state machine, manifest schema). Finish or restart open tasks.
 
+## 0.8.3
+The DSL TestRig agent runs the DSL. It was a one-step stub ("Not in the MVP"); MAT-JAVA25 ran the chain by hand
+(build, copy the centralized folder, fill config, start the packet creator, wait, run, read the report).
+- **`crewline service start | health | stop | list`** (SVC-001..008): runs a server a test run needs in the background
+  (its own process group, log in the run folder), returns once `--ready-url` answers, the process dies (log tail,
+  secret lines masked) or `--ready-timeout` passes (then stops it). `--copy-from` copies the run folder first, so
+  `creds merge` fills a copy and never a tracked file; a `--cwd` git could commit is refused, and so is a port that
+  already answers. `stop` ends the whole process tree. `crewline run` waits for exit, so it could not do this.
+- **`crewline regression` reads DSL scenario reports**: `DSL-<env>-<level>-run-<epoch>-report_T-..html`, per
+  `Scenario_<n>` (`data-status`, and the 1.3/1.4 summary rows); known issue = FAIL, ignored left out; the newest run in a
+  `testng-report/` that keeps every run; base and branch from another `DSL-<env>-<level>` block (REG-009). Checked on
+  the MAT-JAVA25 runs (`P-2_F-1` -> 2 PASS, 1 FAIL) and a released full run (204 = 168 pass + 27 known + 9 ignored).
+- **`knowledge/frameworks/dsl-testrig.md`** profiled from the repository and the MAT-JAVA25 evidence: layout, the
+  10-step run chain as Crewline commands, report names, the JDK 25 failure signatures, rules (`push-reports-to-s3=no`,
+  rebuild the orchestrator after a config change: its config is on the classpath).
+- **`agents/qa/dsl-automation.md`** rewritten: entry checks, procedure by command, what to do per failure, when to stop
+  and ask, a done-check that is a command, and the MAT-JAVA25 sanity run as the example. sdet-architect routes a DSL
+  TestRig (DSC-011) to it.
+
 ## 0.8.2
 Lessons from MAT-ONBOARD (onboarding the DSL TestRig repository mosip-automation-tests). Budgets now count tokens by
 weight, so a task stops later than before; nothing that passed now fails.

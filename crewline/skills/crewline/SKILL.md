@@ -15,7 +15,8 @@ Core: `${CLAUDE_PLUGIN_ROOT}` (the installed plugin). This file is a thin adapte
 Every call re-reads ~100k of fixed context: batch independent reads into one shell call. Multi-repo task from a parent
 folder: `crewline task new --type <t> --id <id> --repo <primary> --repo <dependency>` (fills `scope.repositories`);
 never hand-edit the manifest JSON or read the schema to find fields (`tracker waive`, `approval add`, `task close`,
-`gates refresh` write it). Waiting on the user mid-state: `crewline usage --mark "wait: <what>"` keeps it off the budget.
+`gates refresh` write it). A server a test run needs (the DSL packet creator) goes through
+`crewline service start/health/stop`, never a background shell job. Waiting on the user mid-state: `crewline usage --mark "wait: <what>"` keeps it off the budget.
 **Install first:** Crewline is loaded when the session starts. If it was installed or updated during this session,
 or any command prints VER-005, tell the user to restart the session; never call a plugin-cache copy by full path.
 

@@ -188,6 +188,13 @@ def main(argv: list[str] | None = None) -> int:
                    help="stop the run when its log has not grown for this many minutes (a hung build; EVD-005)")
     p.add_argument("--fail-on", dest="fail_on", metavar="REGEX",
                    help="stop as soon as the log matches, e.g. 'HTTP 401|NotAuthorizedException' for a TestRig login")
+    p = sub.add_parser("service", help="start a background service and wait for its ready URL; health; stop; list")
+    p.add_argument("svc_action", choices=["start", "health", "stop", "list"])
+    p.add_argument("--name", dest="svc_name"); p.add_argument("--cwd", dest="svc_cwd")
+    p.add_argument("--ready-url", dest="ready_url"); p.add_argument("--copy-from", dest="copy_from")
+    p.add_argument("--ready-timeout", dest="ready_timeout", type=float, default=10.0, metavar="MINUTES")
+    p.add_argument("--env", dest="svc_env", action="append", default=[], metavar="KEY=VALUE")
+    p.add_argument("--out", dest="svc_out")
     p = sub.add_parser("clip")
     p.add_argument("--file", help="log path, or - for stdin (omit when a command follows --)")
     p.add_argument("--max-chars", type=int, dest="max_chars")
@@ -370,6 +377,20 @@ def main(argv: list[str] | None = None) -> int:
         elif a.cmd == "run":
             res = evidence.capture(a.repo, a.out, command, a.report, a.cwd, a.env, a.timeout, a.fail_on,
                                    a.stall)
+        elif a.cmd == "service":
+            from . import service
+            if a.svc_action == "list":
+                res = service.listing()
+            elif not a.svc_name:
+                res = Result.not_run("service", "--name is required")
+            elif a.svc_action == "start":
+                res = (service.start(a.svc_name, a.svc_cwd, command, a.ready_url, a.copy_from, a.ready_timeout,
+                                     a.svc_env, a.svc_out) if a.svc_cwd and a.ready_url
+                       else Result.not_run("service", "start needs --cwd and --ready-url"))
+            elif a.svc_action == "health":
+                res = service.health(a.svc_name, a.svc_out)
+            else:
+                res = service.stop(a.svc_name, a.svc_out)
         elif a.cmd == "clip":
             if command:
                 res = clip.run_command(command, a.max_chars)

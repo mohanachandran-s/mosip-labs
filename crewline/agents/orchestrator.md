@@ -110,7 +110,8 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
     `crewline regression --out <task>/evidence/full-regression[-<suite>].json` comparing those suites (REG-007/008).
     Every suite run goes through `crewline run ... --stall <min> --fail-on '<login failure regex>'` (a TestRig whose
     login gets a 401 hangs, a build that starts a server never ends; `--stall` stops a run whose log stopped growing,
-    `--timeout` only when the whole duration is known). A baseline build gets `--stall 10` too. The run keeps its reports in `<task>/evidence/reports/<record>/`:
+    `--timeout` only when the whole duration is known). A baseline build gets `--stall 10` too. A service the run needs
+    (DSL packet creator) is `crewline service start ... --ready-url` before and `service stop` after, also on failure. The run keeps its reports in `<task>/evidence/reports/<record>/`:
     point the user there, never at the worktree's `testng-report/`.
     Before running the base, ask once: "do you have a recent full run of the base on this environment?". If yes, use
     that report: `crewline regression --baseline <their report dir> --baseline-from-user --approver <who> ...` (REG-010

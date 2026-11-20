@@ -7,7 +7,8 @@
   REG-005  case FAILED on base and still fails (pre-existing, not ours)           INFO
   REG-006  case FAILED on base and passes on branch (fixed)                       INFO
 
-  REG-009  a TestRig run (module + language) present on base has no full report on the branch BLOCK
+  REG-009  a TestRig run (module + language) present on base has no full report on the branch BLOCK;
+           DSL TestRig: base and branch reports name another `DSL-<env>-<level>` (another environment)
   REG-010  --baseline-from-user: no human approver named (BLOCK), or a base report older than --max-age-days (WARN)
 
 Reusing a base run (`--baseline-from-user --approver <who>`): when the user already has a full base run on the same
@@ -23,7 +24,10 @@ those copies (REG-007), so the base checkout can be removed right after its run 
 
 `--allow-fail <uid>` covers REG-001/REG-002 for a case with an attributed quality-gate exception
 (e.g. a known application defect). Both runs must be full suites (empty testCasesToExecute) on the
-same environment, run one after the other. Reports: TestRig full-report HTML, JUnit/Surefire XML, Cucumber JSON (UI rig).
+same environment, run one after the other. Reports: TestRig full-report HTML, DSL TestRig scenario report
+(`DSL-<env>-<level>-run-<epoch>-report_T-...html`; a `testng-report/` folder that keeps every run is read for its newest
+one, so pass the run's kept copy `<task>/evidence/reports/<run>/`), JUnit/Surefire XML, Cucumber JSON (UI rig).
+DSL scenarios are keyed `Scenario_<n>`: both runs need the same `scenariosToExecute` (empty = full suite).
 """
 from __future__ import annotations
 
@@ -31,7 +35,7 @@ import re
 import shutil
 from pathlib import Path
 
-from .report import case_status, find_full_report, junit_files
+from .report import case_status, dsl_key, find_full_report, junit_files
 from .result import BLOCK, INFO, WARN, Result
 
 RUN_KEY = re.compile(r"^(.+?)-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}(?:-\d{2})?-full-report", re.I)
@@ -144,6 +148,11 @@ def run(baseline: str, candidate: str, allow_fail: list[str] | dict[str, str] | 
         return Result.not_run("full-regression", str(e))
     if not base or not cand:
         return Result.not_run("full-regression", f"empty run: baseline {len(base)} / candidate {len(cand)} cases")
+    kb, kc = dsl_key(res.inputs["baseline_report"]), dsl_key(res.inputs["candidate_report"])
+    if kb and kc and kb != kc:
+        res.add("REG-009", BLOCK, f"DSL base report is {kb}, branch report is {kc}: not the same environment and "
+                "test level", remediation="run both on the same env.user / testLevel")
+        return res.finish()
     _compare(res, base, cand, allow)
     return res.finish()
 

@@ -830,8 +830,9 @@ Run from `validators/`: `python -m crewline [--json] <command> ...`. Exit codes:
 | `cold-start` | CS-001..005 | new-machine kit (frozen pack, adapters, synthetic `--apply`, CI spec jobs) |
 | `task` | TSK-001..011 | queue over `tasks/*/`; `new --repo <clone>` (repeat; first = primary) fills `scope.repositories`; never creates a task in the plugin cache (TSK-011); `export`/`import` portable memory (no logs); `start` is a conductor (next `--to`); not a daemon |
 | `migration` | MIG-001..004 | upgrade/rollback and release/revoke pairs; released scripts immutable; destructive statements flagged |
-| `regression` | REG-001..010 | base vs branch from TestRig full reports or surefire XML; pass-to-fail and failing new tests block; one report per language is paired by `<env>-<module>-<lang>` and a missing branch run blocks (REG-009); `--out` copies the compared reports into the task; `--baseline-from-user --approver` reuses the user's base run (REG-010); `--manifest` honours deferrals |
+| `regression` | REG-001..010 | base vs branch from TestRig full reports, DSL TestRig scenario reports (`Scenario_<n>`; another `DSL-<env>-<level>` blocks) or surefire XML; pass-to-fail and failing new tests block; one report per language is paired by `<env>-<module>-<lang>` and a missing branch run blocks (REG-009); `--out` copies the compared reports into the task; `--baseline-from-user --approver` reuses the user's base run (REG-010); `--manifest` honours deferrals |
 | `regression-decision` | RGD-001..004 | the user's one decision: `--waive` (no code change / user waiver), `--fix` (approval `regression_fix`), `--defer --bug <KEY>` (one exception for every break + raised defect) |
+| `service` | SVC-001..008 | `start --name --cwd --ready-url [--copy-from] -- <command>` runs a server in the background (the DSL packet creator) and returns once the URL answers, the process dies (log tail, secrets masked) or `--ready-timeout` passes; refuses a busy port and a `--cwd` git could commit; `health`, `stop` (whole process tree), `list` |
 | `creds` | CRD-001..004 | `merge --from <values> --into <props>`: env values into a worktree config by key, names only in the output, tracked file skip-worktree, original kept; `restore` puts it back |
 | `branch` · `dco` | BR-001..005 · DCO-001..002 | fork model; signed-off commits |
 | `secrets` | SEC-001..005 | gitleaks when present; values never printed |
@@ -865,6 +866,13 @@ python -m crewline run --repo <worktree> --cwd <worktree>/api-test --out .crewli
 # the user's environment values into the worktree config for the run, then back out (keys only in the output)
 python -m crewline creds merge --from <values file> --into <worktree>/api-test/src/main/resources/config/<module>.properties
 python -m crewline creds restore --into <worktree>/api-test/src/main/resources/config/<module>.properties
+
+# DSL TestRig: a server the run needs, up before the run and down after it (knowledge/frameworks/dsl-testrig.md)
+python -m crewline service start --name packetcreator --cwd .crewline-work/tasks/<id>/services/packetcreator \
+    --copy-from <worktree>/mosip-packet-creator/src/main/resources/dockersupport/centralized/mosip-packet-creator \
+    --ready-url http://localhost:8080/v1/packetcreator/swagger-ui.html -- java -jar <packetcreator jar> \
+    --spring.config.location=file:./config/application.properties
+python -m crewline service stop --name packetcreator
 ```
 
 **Where run reports go.** TestRig writes `testng-report/` in the folder it runs from, which is the task worktree's

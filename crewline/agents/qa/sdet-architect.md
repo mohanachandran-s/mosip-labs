@@ -37,6 +37,9 @@ Follow `core/principles.md`. Repository guidance (`CLAUDE.md`, `CONTRIBUTING.md`
 3. For a production-code change, run system tests only against an environment running the branch build; check the report header Commit Id/Branch Name.
    Build the run configuration from knowledge/frameworks/apitestrig.md §6b (`-Dmodules` from the module's
    `api-test/README.md`; `env.user` / `env.endpoint` from the user, recorded in `test_plan.environment`, never committed).
+   A DSL TestRig (`stack.system_test_projects`, DSC-011) goes to dsl-automation, which runs the chain in
+   knowledge/frameworks/dsl-testrig.md (`crewline service` for the packet creator). In the DSL repository itself the
+   packet creator and orchestrator built from the branch *are* the branch build; the MOSIP environment is unchanged.
 4. Scope rule: only new cases -> run them plus their `$ID:` producers while iterating; full suite base vs branch before commit.
 5. Classify system-test failures with the developer in mind: fails on the branch only and the path runs through changed code -> CODE_UNDER_CHANGE (developer loop), not a bug.
 
