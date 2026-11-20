@@ -4,6 +4,7 @@ description: "Write and run DSL TestRig scenarios (mosip-automation-tests): buil
 tools: Read, Grep, Glob, Bash, Edit, Write
 permission_profile: "workspace-write"
 workflow_states: "IMPLEMENTATION (scenarios), SYSTEM_TEST_EXECUTION"
+skeleton: 2
 ---
 
 # DSL Automation Specialist
@@ -35,6 +36,13 @@ is more specific. The rig itself is described in `knowledge/frameworks/dsl-testr
 | JDK the branch needs | `crewline run ... --env JAVA_HOME=<jdk> -- java -version` (record `java_version`) |
 | Port 8080 free | `crewline service list`; `service start` refuses a busy port (SVC-003) |
 | Packet creator and orchestrator built on this commit | the build record's `commit` equals `git -C <wt> rev-parse HEAD` (`crewline evidence --record`) |
+
+## Produces
+
+- scenario changes in `scenarios.feature` (and parser/method changes handed to software-developer)
+- records: `<task>/evidence/build-dsl.json`, `service-packetcreator.json`, `system-tests-dsl.json` (+ `-base`),
+  `full-regression-dsl.json`; the kept DSL report under `<task>/evidence/reports/system-tests-dsl/`
+- `system_test_ids` (`Scenario_<n>`) per AC with results (TRC-008/009)
 
 ## Procedure
 

@@ -9,6 +9,22 @@ because Claude Code updates an installed plugin only when that version changes. 
   changed for them.
 - **MAJOR**: a change that can break a task in progress (state machine, manifest schema). Finish or restart open tasks.
 
+## 0.8.4
+Agent definitions say how, not only what. The busiest agents were role descriptions (about 50 lines, mostly "do X"):
+no check before starting, no command per step, no rule for what to do when a step fails, and "done" was the agent's
+opinion.
+- **`docs/agent-skeleton.md`** (`skeleton: 2`): Inputs, Entry checks (`Check | How`), Produces, Procedure (each step
+  names its command), When something fails (`What you see | Do`, by rule id or log signature), Stop and ask the user,
+  Done when (commands that must PASS), Example (a real pilot run), Must not, Output contract.
+- **Rewritten on it:** api-automation, failure-analyst, impact-analyst, software-developer, sdet-architect (and
+  dsl-automation from 0.8.3). Every rule id and `crewline` command they cite exists; examples come from PILOT-001,
+  PILOT-002 and MOSIP-45750.
+  - failure-analyst asks the automation agent for a system-test base run (its analysis profile runs unit tests only).
+  - impact-analyst stops reading when the same file comes back a third time or the state budget is near
+    (MAT-JAVA25 spent 5.3M tokens in IMPACT_ANALYSIS).
+- **`validators/tests/test_agent_skeleton.py`** keeps the sections present and in order, the two tables in place, and
+  a `crewline` command in Procedure and Done when, for every agent that declares `skeleton: 2`.
+
 ## 0.8.3
 The DSL TestRig agent runs the DSL. It was a one-step stub ("Not in the MVP"); MAT-JAVA25 ran the chain by hand
 (build, copy the centralized folder, fill config, start the packet creator, wait, run, read the report).

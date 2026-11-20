@@ -5,6 +5,8 @@ specialist grouped by the role it plays in a team. Folders are for people; the w
 by their `name:` (installed as `crewline-<name>`), so moving a file between role folders changes nothing at runtime.
 Product facts (TestRig, MOSIP map, stack tools) come from the active pack (`python -m crewline pack`), not from `core/`.
 
+Agents marked `skeleton: 2` follow [agent-skeleton.md](agent-skeleton.md): entry checks, commands per step, a failure table, stop conditions, a done-check that is a command, and a real example.
+
 | Role | Agent | Workflow states | Permission profile |
 |---|---|---|---|
 | Orchestration | [`orchestrator`](../agents/orchestrator.md) | all | analysis |
