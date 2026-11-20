@@ -24,5 +24,9 @@ Rules for writing one:
   to them instead of copying them.
 - The example is a real run (task id, ids, counts). Leave it out rather than invent one; say which pilot it came from.
 
-Agents on skeleton 2: dsl-automation, api-automation, failure-analyst, impact-analyst, software-developer,
-sdet-architect. The others keep the 0.8 layout until they are rewritten the same way.
+- An agent with a read-only profile cannot run `crewline`: its Procedure names the command the orchestrator runs for
+  it, and its Done when is that command's result.
+
+Agents on skeleton 2: requirement-analyst, impact-analyst, testcase-designer,
+testcase-reviewer, software-developer, api-automation, dsl-automation, failure-analyst, defect-analyst, code-reviewer,
+fresh-context-reviewer, sdet-architect. The others keep the 0.8 layout until they are rewritten the same way.

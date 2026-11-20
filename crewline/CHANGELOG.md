@@ -9,6 +9,19 @@ because Claude Code updates an installed plugin only when that version changes. 
   changed for them.
 - **MAJOR**: a change that can break a task in progress (state machine, manifest schema). Finish or restart open tasks.
 
+## 0.8.5
+Six more agents on `skeleton: 2`: requirement-analyst, testcase-designer, testcase-reviewer, code-reviewer,
+fresh-context-reviewer and defect-analyst. With 0.8.3/0.8.4 that is 12 of 25: each has entry checks, a command per step,
+a failure table by rule id, stop points and a done-check that is a command.
+- Read-only agents (requirement-analyst, testcase-reviewer, defect-analyst) name the `crewline` command the
+  orchestrator runs for them; they cannot run it themselves.
+- requirement-analyst: REQ-001..006 table; PILOT-002's two review-found gaps as the case for asking during requirements.
+- testcase-designer keeps the KM-COV-001 token rules; failures keyed on CoverageCli gap names and NAME/DEP/EXP rules.
+- testcase-reviewer checks what a case really sends (runtime templates) and asserts (`checkErrorsOnlyInResponse`).
+- code-reviewer re-runs `change-scope` / `test-integrity` on HEAD; fresh-context-reviewer re-reviews from the previous
+  findings, not from scratch (rule 14b); both end in `crewline review record` by the orchestrator.
+- defect-analyst: CODE_UNDER_CHANGE and branch-only failures are not bugs; DEF-001..003 table.
+
 ## 0.8.4
 Agent definitions say how, not only what. The busiest agents were role descriptions (about 50 lines, mostly "do X"):
 no check before starting, no command per step, no rule for what to do when a step fails, and "done" was the agent's

@@ -9,7 +9,9 @@ import pytest
 AGENTS = Path(__file__).resolve().parents[2] / "agents"
 SECTIONS = ["Inputs", "Entry checks", "Produces", "Procedure", "When something fails", "Stop and ask the user",
             "Done when", "Example", "Must not", "Output contract"]
-MIGRATED = {"dsl-automation", "api-automation", "failure-analyst", "impact-analyst", "software-developer", "sdet-architect"}
+MIGRATED = {"dsl-automation", "api-automation", "failure-analyst", "impact-analyst", "software-developer", "sdet-architect",
+            "requirement-analyst", "testcase-designer", "testcase-reviewer", "code-reviewer", "fresh-context-reviewer",
+            "defect-analyst"}
 
 
 def _skeleton2() -> list[Path]:
